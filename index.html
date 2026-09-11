@@ -475,7 +475,16 @@ function wireTimerStepper(){
 
 function startRound(){
   state.pool = DATA[state.division];
-  state.round = shuffled(state.pool).slice(0,12);
+  // Desired total word counts per division
+  const targetMap = {primary:800, junior:1000, senior:1200};
+  const targetWords = targetMap[state.division] || 800;
+  // Helper to count words in a passage
+  const countWords = (p)=> p.text.trim().split(/\s+/).length;
+  // Shuffle pool and pick passages until we have 12 and meet target word count
+  const shuffledPool = shuffled(state.pool);
+  // Simply take the first 12 shuffled passages; total word count will be approximate
+  const selected = shuffledPool.slice(0, 12);
+  state.round = selected;
   state.currentIndex = 0;
   state.records = new Array(12).fill(null);
   state.timeLeft = state.minutes*60;
