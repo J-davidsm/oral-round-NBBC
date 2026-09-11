@@ -419,7 +419,10 @@ const DIVISIONS = [
 
 let state = {
   division:null, minutes:8, pool:[], round:[], currentIndex:0,
-  wrongSet:new Set(), insertSet:new Set(), records:[], timeLeft:0, timerId:null, finished:false,
+  // Sets for the current passage; will be saved into records on finalize
+  wrongSet:new Set(), insertSet:new Set(),
+  // Each record will hold {ref, errors, points, wrongIndices, insertIndices, reached}
+  records:[], timeLeft:0, timerId:null, finished:false,
   listening:false, voiceFinal:"", expectedNorm:[]
 };
 
@@ -571,7 +574,14 @@ function updateLiveScore(){ $("liveScore").textContent = currentScore(); }
 function finalizeCurrent(){
   if(state.records[state.currentIndex]) return;
   const p = currentPassage();
-  state.records[state.currentIndex] = { ref:p.ref, errors: currentErrors(), points: currentScore(), reached:true };
+  state.records[state.currentIndex] = {
+    ref:p.ref,
+    errors: currentErrors(),
+    points: currentScore(),
+    wrongIndices: Array.from(state.wrongSet),
+    insertIndices: Array.from(state.insertSet),
+    reached:true
+  };
   const total = state.records.reduce((sum,r)=> sum + (r? r.points:0), 0);
   $("runningScore").textContent = total;
 }
@@ -799,6 +809,71 @@ function finishRound(){
     }
     card.appendChild(row);
   });
+  // Add a button to view detailed passage review
+  const reviewBtn = document.createElement("button");
+  reviewBtn.className = "btn-secondary";
+  reviewBtn.id = "reviewBtn";
+  reviewBtn.textContent = "Review Passages";
+  reviewBtn.addEventListener("click",()=>{
+    $("reviewSection").hidden = false;
+    $("results").hidden = true;
+    renderReview();
+  });
+  card.parentNode.appendChild(reviewBtn);
+
+  // Hidden container for the detailed review
+  const reviewDiv = document.createElement("div");
+  reviewDiv.id = "reviewSection";
+  reviewDiv.hidden = true;
+  reviewDiv.innerHTML = `
+    <h2>Passage Review</h2>
+    <div id="reviewList"></div>
+    <button class="btn-primary" id="backToResults">Back to Results</button>`;
+  document.body.appendChild(reviewDiv);
+  $("backToResults").addEventListener("click",()=>{
+    $("reviewSection").hidden = true;
+    $("results").hidden = false;
+  });
+
+  // Render the detailed review list
+  function renderReview(){
+    const list = $("reviewList");
+    list.innerHTML = "";
+    state.round.forEach((p,idx)=>{
+      const rec = state.records[idx];
+      const container = document.createElement("div");
+      container.className = "passage-card";
+      const top = document.createElement("div");
+      top.className = "ref-line";
+      top.textContent = p.ref;
+      const bottom = top.cloneNode(true);
+      bottom.className = "ref-line bottom";
+      const textDiv = document.createElement("div");
+      textDiv.className = "passage-text";
+      const words = p.text.trim().split(/\s+/);
+      words.forEach((w,i)=>{
+        const span = document.createElement("span");
+        span.className = "word";
+        span.textContent = w;
+        if(rec && rec.wrongIndices.includes(i)) span.classList.add("wrong");
+        textDiv.appendChild(span);
+        if(i<words.length-1){
+          const gap = document.createElement("span");
+          gap.className = "gap";
+          if(rec && rec.insertIndices.includes(i)) gap.classList.add("insert");
+          textDiv.appendChild(gap);
+        }
+      });
+      container.appendChild(top);
+      container.appendChild(textDiv);
+      container.appendChild(bottom);
+      const score = document.createElement("div");
+      score.className = "score-live";
+      score.textContent = rec ? `Score: ${rec.points}/25, Errors: ${rec.errors}` : "Not reached";
+      container.appendChild(score);
+      list.appendChild(container);
+    });
+  }
 }
 
 function backToSetup(){
