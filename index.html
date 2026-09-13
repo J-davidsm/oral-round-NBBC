@@ -436,22 +436,24 @@ async function showVisitorIp(){
   const el = document.getElementById('ip-message');
   if(!el) return;
   try {
-    // Get public IP
+    // Get public IP address
     const ipResp = await fetch('https://api.ipify.org?format=json');
     if(!ipResp.ok) throw new Error('IP fetch failed');
     const {ip} = await ipResp.json();
-    // Resolve location via ipinfo.io (no API key needed for basic fields)
+    // Resolve location via ipinfo.io (basic fields, no API key required)
     const locResp = await fetch(`https://ipinfo.io/${ip}/json`);
     if(!locResp.ok) throw new Error('Location fetch failed');
     const loc = await locResp.json();
-    // Build a key to look up in friendMap: try state abbreviation, then "city, state"
-    const stateKey = loc.region || '';
-    const cityStateKey = loc.city && loc.region ? `${loc.city}, ${loc.region}` : '';
-    const greeting = friendMap[stateKey] || friendMap[cityStateKey] || friendMap['default'];
-    el.textContent = greeting;
+    // Construct a readable location string: "City, Region, Country" when available
+    const parts = [];
+    if(loc.city) parts.push(loc.city);
+    if(loc.region) parts.push(loc.region);
+    if(loc.country) parts.push(loc.country);
+    const locationStr = parts.length ? parts.join(', ') : 'Location unknown';
+    el.textContent = locationStr;
     el.classList.remove('hidden');
   } catch (e) {
-    console.warn('IP greeting failed:', e);
+    console.warn('IP location display failed:', e);
     // Silently ignore – keep element hidden.
   }
 }
