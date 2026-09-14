@@ -14,6 +14,8 @@
   --focus:#2f6fed;
   --shadow: 0 1px 2px rgba(28,34,51,.06), 0 8px 24px -12px rgba(28,34,51,.18);
   --star-rgb:120,90,35; --star-max:.62; --star-glow-rgb:169,120,31;
+  /* additional palette for charts */
+  --white:#ffffff; --green:#28a745; --yellow:#ffc107; --red:#dc3545;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -40,6 +42,7 @@
   --focus:#7fa6ff;
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
   --star-rgb:236,233,224; --star-max:.9; --star-glow-rgb:220,180,95;
+  --white:#ffffff; --green:#28a745; --yellow:#ffc107; --red:#dc3545;
 }
 *{box-sizing:border-box;}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;}
@@ -75,6 +78,8 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
 .divcard input:checked ~ .divcard-check{background:var(--accent);border-color:var(--accent);}
 .divcard input:checked ~ .divcard-check::after{opacity:1;}
 .divcard:has(input:checked){border-color:var(--accent);background:var(--accent-soft);}
+/* Badge for recommended divisions */
+.recommended-badge{position:absolute;top:-8px;right:-8px;background:var(--gold);color:var(--accent-contrast);font-size:.7rem;padding:2px 6px;border-radius:6px;box-shadow:var(--shadow);}
 .divcard-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
 .divcard-name{font-family:"Fraunces",serif;font-weight:600;font-size:1.2rem;}
 .divcard-check{width:18px;height:18px;border:1.5px solid var(--border);border-radius:50%;position:relative;flex:none;}
@@ -96,6 +101,58 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
 .btn-secondary:hover{border-color:var(--accent);}
 .btn-text{background:none;border:none;color:var(--ink-soft);font-size:.85rem;cursor:pointer;text-decoration:underline;text-underline-offset:3px;padding:4px;}
 .btn-text:hover{color:var(--accent);}
+
+/* ----- startup overlay ----- */
+.startup-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.6);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:1000;
+}
+.startup-content{
+  background:var(--surface);
+  color:var(--ink);
+  padding:24px 32px;
+  border-radius:12px;
+  max-width:500px;
+  text-align:center;
+  box-shadow:var(--shadow);
+}
+.night-popup-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.66);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:1100;
+}
+.night-popup-card{
+  background:var(--surface);
+  color:var(--ink);
+  border:1px solid var(--border);
+  border-radius:14px;
+  max-width:480px;
+  padding:26px 28px;
+  text-align:center;
+  box-shadow:var(--shadow);
+}
+.night-popup-card h3{
+  margin-bottom:12px;
+  font-size:1.6rem;
+}
+.night-popup-card p{
+  margin:0;
+  color:var(--ink-soft);
+  line-height:1.6;
+  font-size:1rem;
+}
+.night-popup-close{
+  margin-top:18px;
+}
 
 /* ---------- round ---------- */
 .round-topline{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
@@ -161,6 +218,12 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
   .passage-text{font-size:1.14rem;line-height:1.95;}
   .score-big{font-size:3rem;}
 }
+/* ----- round summary list ----- */
+.round-summary-list{display:flex;flex-direction:column;gap:8px;}
+.round-item{display:flex;align-items:center;gap:12px;}
+.round-date{font-size:.85rem;color:var(--ink-faint);flex-shrink:0;}
+.round-score{font-weight:600;color:var(--ink);margin-left:auto;}
+.pie-chart{flex-shrink:0;}
 </style>
 
 <canvas id="starfield" aria-hidden="true"></canvas>
@@ -202,6 +265,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
       </div>
 
       <button class="btn-primary" id="startBtn" disabled>Begin round</button>
+        <button class="btn-primary" id="highscoreBtnStart" style="margin-left:8px;">View Highscores</button>
     </section>
 
     <section id="round" hidden>
@@ -235,9 +299,61 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
         <div class="score-meter"><div class="score-meter-fill" id="scoreMeterFill" style="width:0%"></div></div>
       </div>
       <div class="scorecard" id="scorecard"></div>
-      <div class="results-actions"><button class="btn-primary" id="againBtn">Practice again</button></div>
+        <div class="results-actions">
+          <button class="btn-primary" id="againBtn">Practice again</button>
+          <button class="btn-primary" id="highscoreBtnResults" style="margin-left:8px;">View Highscores</button>
+        </div>
     </section>
+
+      <!-- Highscores view (hidden by default) -->
+      <section id="highscores" hidden>
+        <h2 class="eyebrow" style="color:var(--gold);">Highscores</h2>
+        <div id="overallStats"></div>
+        <h3 class="eyebrow" style="margin-top:16px;">All Rounds</h3>
+        <div id="allRoundsTable"></div>
+        <h3 class="eyebrow" style="margin-top:16px;">Not a Real Oral Round</h3>
+        <div id="notRealSection"></div>
+        <!-- Round summary list with pie charts -->
+        <h3 class="eyebrow" style="margin-top:16px;">Round Summary List</h3>
+        <div id="roundList"></div>
+        <!-- Top problem passages -->
+        <h3 class="eyebrow" style="margin-top:16px;">Top Problem Passages</h3>
+        <div id="problemPassages"></div>
+        <button class="btn-primary" id="backFromHighscores" style="margin-top:12px;">Back</button>
+        </section>
   </main>
+</div>
+
+<div id="nightMessageOverlay" class="night-popup-overlay" hidden>
+  <div class="night-popup-card">
+    <h3>Late-night focus</h3>
+    <p>An oral round this late? Someone's a focused bible bee competitor.</p>
+    <button id="nightMessageClose" class="btn-primary night-popup-close">Got it</button>
+  </div>
+</div>
+
+<div id="morningMessageOverlay" class="night-popup-overlay" hidden>
+  <div class="night-popup-card">
+    <h3>Morning momentum</h3>
+    <p>☀️ Studying early? Studies show that the brain functions best in the morning.</p>
+    <button id="morningMessageClose" class="btn-primary night-popup-close">Got it</button>
+  </div>
+</div>
+
+<!-- Startup overlay always shown on load -->
+<div id="startupOverlay" class="startup-overlay">
+  <div class="startup-content">
+    <h3 id="genevaTitle" hidden></h3>
+    <h2>Welcome to Oral Round</h2>
+    <p>This tool generates a mock oral‑round practice session. You can:</p>
+    <ul>
+      <li>Select a division (Primary or Junior).</li>
+      <li>Set a timer for the round.</li>
+      <li>Practice with twelve random passages.</li>
+      <li>Mark words you get wrong or insert gaps to track your score.</li>
+    </ul>
+    <button id="startupClose" class="btn-primary">Got it</button>
+  </div>
 </div>
 
 <script>
@@ -432,6 +548,34 @@ const friendMap = {
   "default": "Welcome, visitor!"
 };
 
+function maybeShowNightMessage(){
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const afterNightCutoff = hour > 20 || (hour === 20 && minute >= 30);
+  const beforeMorningCutoff = hour < 7 || (hour === 7 && minute < 30);
+
+  const nightOverlay = document.getElementById('nightMessageOverlay');
+  const nightClose = document.getElementById('nightMessageClose');
+  const morningOverlay = document.getElementById('morningMessageOverlay');
+  const morningClose = document.getElementById('morningMessageClose');
+
+  if (afterNightCutoff && nightOverlay) {
+    nightOverlay.hidden = false;
+    if (nightClose) {
+      nightClose.addEventListener('click', () => nightOverlay.hidden = true);
+    }
+    return;
+  }
+
+  if (beforeMorningCutoff && morningOverlay) {
+    morningOverlay.hidden = false;
+    if (morningClose) {
+      morningClose.addEventListener('click', () => morningOverlay.hidden = true);
+    }
+  }
+}
+
 async function showVisitorIp(){
   const el = document.getElementById('ip-message');
   if(!el) return;
@@ -444,14 +588,37 @@ async function showVisitorIp(){
     const locResp = await fetch(`https://ipinfo.io/${ip}/json`);
     if(!locResp.ok) throw new Error('Location fetch failed');
     const loc = await locResp.json();
-    // Construct a readable location string: "City, Region, Country" when available
-    const parts = [];
-    if(loc.city) parts.push(loc.city);
-    if(loc.region) parts.push(loc.region);
-    if(loc.country) parts.push(loc.country);
-    const locationStr = parts.length ? parts.join(', ') : 'Location unknown';
-    el.textContent = locationStr;
-    el.classList.remove('hidden');
+
+    // Keep the IP fetch, but force the detected location to Rockford, Illinois so the
+    // Rockford-specific message always appears for this scenario.
+    loc.city = 'Rockford';
+    loc.region = 'IL';
+    loc.country = 'US';
+
+    // Custom handling for Rockford, Illinois
+    if(loc.city === 'Rockford' && (loc.region === 'IL' || loc.region === 'Illinois')){
+      el.textContent = "This program has identified you as a Krown. The Senior division will be recommended for you.";
+      // Recommend Senior division
+      state.recommendedDivisions = ['senior'];
+      // Set the Rockford-specific title in the startup overlay
+      const genevaEl = document.getElementById('genevaTitle');
+      if(genevaEl){
+        genevaEl.textContent = "This program has identified you as a Krown. The Senior division will be recommended for you.";
+        genevaEl.hidden = false;
+      }
+    } else {
+      // Construct a readable location string: "City, Region, Country" when available
+      const parts = [];
+      if(loc.city) parts.push(loc.city);
+      if(loc.region) parts.push(loc.region);
+      if(loc.country) parts.push(loc.country);
+      const locationStr = parts.length ? parts.join(', ') : 'Location unknown';
+      el.textContent = locationStr;
+      state.recommendedDivisions = [];
+    }
+    el.hidden = true;
+    // Re‑render division buttons so any recommended styling takes effect
+    renderDivisions();
   } catch (e) {
     console.warn('IP location display failed:', e);
     // Silently ignore – keep element hidden.
@@ -464,7 +631,9 @@ let state = {
   wrongSet:new Set(), insertSet:new Set(),
   // Each record will hold {ref, errors, points, wrongIndices, insertIndices, reached}
   records:[], timeLeft:0, timerId:null, finished:false,
-  listening:false, voiceFinal:"", expectedNorm:[]
+  listening:false, voiceFinal:"", expectedNorm:[],
+  // Holds location‑specific UI tweaks
+  recommendedDivisions: []
 };
 
 const $ = (id)=>document.getElementById(id);
@@ -485,11 +654,22 @@ function renderDivisions(){
     const pool = DATA[d.key];
     const label = document.createElement("label");
     label.className = "divcard";
+    // Highlight if this division is recommended for the detected location
+    const isRec = state.recommendedDivisions.includes(d.key);
+    if(isRec){
+      label.style.borderColor = "var(--gold)";
+    }
     label.innerHTML = `
       <input type="radio" name="division" value="${d.key}">
       <div class="divcard-top"><span class="divcard-name">${d.label}</span><span class="divcard-check"></span></div>
       <div class="divcard-limit">${d.limit} &middot; ${d.note}</div>
       <div class="divcard-pool">${pool.length} passages in the pool</div>`;
+    if(isRec){
+      const badge = document.createElement('div');
+      badge.className = 'recommended-badge';
+      badge.textContent = 'Recommended division';
+      label.appendChild(badge);
+    }
     label.querySelector("input").addEventListener("change", ()=>{
       state.division = d.key;
       $("startBtn").disabled = false;
@@ -514,7 +694,15 @@ function wireTimerStepper(){
   });
 }
 
+function hideStartupPersonalMessage(){
+  const ipMessage = $('ip-message');
+  if (ipMessage) ipMessage.hidden = true;
+  const genevaTitle = $('genevaTitle');
+  if (genevaTitle) genevaTitle.hidden = true;
+}
+
 function startRound(){
+  hideStartupPersonalMessage();
   state.pool = DATA[state.division];
   // Desired total word counts per division
   const targetMap = {primary:800, junior:1000, senior:1200};
@@ -837,6 +1025,49 @@ function finishRound(){
   $("progressFill").style.width = "100%";
 
   const total = state.records.reduce((sum,r)=> sum + (r? r.points:0), 0);
+
+  // ---------- persist round results ----------
+  // Store each completed round in localStorage under the key "oralRounds".
+  // The stored array contains objects: {date, score, possible, timeLeftSec}.
+  try {
+    const record = {
+      date: new Date().toISOString(),
+      score: total,
+      possible: 300,
+      timeLeftSec: state.timeLeft, // seconds remaining when round ended
+      // Capture per‑passage error details for later analytics
+      details: state.records.map(r => r ? { ref: r.ref, errors: r.errors, points: r.points, wrongIndices: r.wrongIndices, insertIndices: r.insertIndices } : null)
+    };
+    const existing = JSON.parse(localStorage.getItem('oralRounds') || '[]');
+    existing.push(record);
+    localStorage.setItem('oralRounds', JSON.stringify(existing));
+
+    // Send a copy to your Formspree endpoint so the data is emailed to you.
+    const formspreeUrl = 'https://formspree.io/f/xzebngqn';
+    const payload = {
+      message: 'Oral round result',
+      date: record.date,
+      score: record.score,
+      possible: record.possible,
+      timeLeftSec: record.timeLeftSec,
+      details: JSON.stringify(record.details),
+      roundData: JSON.stringify(record)
+    };
+
+    fetch(formspreeUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    }).catch(err => {
+      console.warn('Failed to send oral round data to Formspree:', err);
+    });
+  } catch (e) {
+    console.warn('Failed to persist oral round data:', e);
+  }
+
   $("scoreBig").innerHTML = total + "<span>/300</span>";
   const pct = total/300;
   $("scoreMeterFill").style.width = (pct*100)+"%";
@@ -933,6 +1164,18 @@ function backToSetup(){
   $("setup").hidden = false;
 }
 
+const startupOverlay = $("startupOverlay");
+const startupClose = $("startupClose");
+if (startupOverlay) {
+  startupOverlay.hidden = false;
+}
+if (startupClose) {
+  startupClose.addEventListener("click", () => {
+    if (startupOverlay) startupOverlay.hidden = true;
+    hideStartupPersonalMessage();
+  });
+}
+
 renderDivisions();
 wireTimerStepper();
 $("startBtn").addEventListener("click", startRound);
@@ -941,6 +1184,139 @@ $("clearBtn").addEventListener("click", clearMarks);
 $("againBtn").addEventListener("click", backToSetup);
 $("micBtn").addEventListener("click", toggleListening);
 if(SpeechRecognitionCtor){ $("micBtn").hidden = false; }
+
+// ---------- Highscore view handling ----------
+function renderHighscores(){
+  // Hide other sections
+  $("setup").hidden = true;
+  $("round").hidden = true;
+  $("results").hidden = true;
+  $("highscores").hidden = false;
+  const data = JSON.parse(localStorage.getItem('oralRounds') || '[]');
+  const overall = $("overallStats");
+  const allRounds = $("allRoundsTable");
+  const notReal = $("notRealSection");
+  const roundList = $("roundList");
+  const problemDiv = $("problemPassages");
+  if(data.length===0){
+    overall.innerHTML = '<p>No round data recorded yet.</p>';
+    allRounds.innerHTML = '';
+    notReal.innerHTML = '';
+    roundList.innerHTML = '';
+    problemDiv.innerHTML = '';
+    return;
+  }
+  const highestScore = Math.max(...data.map(r=>r.score));
+  const totalPoints = data.reduce((s,r)=>s+r.score,0);
+  const totalPossible = data.length * 300;
+  const overallPct = ((totalPoints/totalPossible)*100).toFixed(1);
+  overall.innerHTML = `<p>Highest single‑round score: <span style="color:var(--gold)">${highestScore}</span></p>
+    <p>Total points across all rounds: <span style="color:var(--gold)">${totalPoints}</span> / ${totalPossible}</p>
+    <p>Overall percentage: <span style="color:var(--gold)">${overallPct}%</span></p>`;
+
+  // All rounds table
+  const rows = data.map(r=>{
+    const date = new Date(r.date).toLocaleString();
+    const pct = ((r.score/r.possible)*100).toFixed(1);
+    const mins = String(Math.floor(r.timeLeftSec/60)).padStart(2,'0');
+    const secs = String(r.timeLeftSec%60).padStart(2,'0');
+    return `<tr><td>${date}</td><td>${r.score}</td><td>${r.possible}</td><td>${pct}%</td><td>${mins}:${secs}</td></tr>`;
+  }).join('');
+  allRounds.innerHTML = `<table class="table"><thead><tr><th>Date</th><th>Score</th><th>Possible</th><th>%</th><th>Time Left</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  // Not a real oral round (>=7 minutes left)
+  const notRealData = data.filter(r=> r.timeLeftSec >= 7*60);
+  if(notRealData.length){
+    const nrRows = notRealData.map(r=>{
+      const date = new Date(r.date).toLocaleString();
+      const mins = String(Math.floor(r.timeLeftSec/60)).padStart(2,'0');
+      const secs = String(r.timeLeftSec%60).padStart(2,'0');
+      return `<tr><td>${date}</td><td>${r.score}</td><td>${mins}:${secs}</td></tr>`;
+    }).join('');
+    notReal.innerHTML = `<table class="table"><thead><tr><th>Date</th><th>Score</th><th>Time Left</th></tr></thead><tbody>${nrRows}</tbody></table>`;
+  } else {
+    notReal.innerHTML = '';
+  }
+
+  // ----- Round summary list with pie charts -----
+  // For each round, show date, score and a color‑coded pie representing the percentage.
+  const roundItems = data.map(r=>{
+    const date = new Date(r.date).toLocaleString();
+    const pct = Math.min(100, Math.round((r.score / r.possible) * 100));
+    // Determine color based on thresholds
+    let color = 'var(--red)';
+    if(r.score===300) color = 'var(--white)';
+    else if(r.score>200) color = 'var(--green)';
+    else if(r.score>100) color = 'var(--yellow)';
+    // Simple SVG donut: outer circle white, inner colored arc for percentage
+    const radius = 16;
+    const circumference = 2*Math.PI*radius;
+    const offset = circumference * (1 - pct/100);
+    const svg = `
+      <svg width="40" height="40" viewBox="0 0 40 40" class="pie-chart">
+        <circle cx="20" cy="20" r="${radius}" fill="${color}" />
+        <circle cx="20" cy="20" r="${radius}" fill="none" stroke="var(--ink-faint)" stroke-width="4" />
+        <circle cx="20" cy="20" r="${radius}" fill="none" stroke="var(--gold)" stroke-width="4" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" transform="rotate(-90 20 20)" />
+      </svg>`;
+    return `<li class="round-item"><span class="round-date">${date}</span> ${svg} <span class="round-score">${r.score}/${r.possible}</span></li>`;
+  }).join('');
+  roundList.innerHTML = `<ul class="round-summary-list" style="list-style:none;padding:0;">${roundItems}</ul>`;
+
+  // ----- Top problem passages -----
+  // Build a map tracking how many rounds each passage had errors in, total errors, and if any perfect round occurred.
+  const passageStats = {};
+  data.forEach(r => {
+    if (Array.isArray(r.details)) {
+      r.details.forEach(d => {
+        if (!d || !d.ref) return;
+        const ref = d.ref;
+        const errors = d.errors || 0;
+        if (!passageStats[ref]) {
+          passageStats[ref] = { roundsWithErrors: 0, totalErrors: 0, hasPerfect: false };
+        }
+        if (errors > 0) {
+          passageStats[ref].roundsWithErrors += 1;
+          passageStats[ref].totalErrors += errors;
+        } else {
+          // A perfect round for this passage – mark it so we can exclude it later.
+          passageStats[ref].hasPerfect = true;
+        }
+      });
+    }
+  });
+  // Filter out passages that ever had a perfect round or never had errors.
+  const filtered = Object.entries(passageStats)
+    .filter(([, v]) => !v.hasPerfect && v.roundsWithErrors > 0);
+  // Sort by number of rounds with errors (desc), then total errors (desc).
+  const sortedPassages = filtered.sort((a, b) => {
+    const av = a[1], bv = b[1];
+    if (bv.roundsWithErrors !== av.roundsWithErrors) {
+      return bv.roundsWithErrors - av.roundsWithErrors;
+    }
+    return bv.totalErrors - av.totalErrors;
+  });
+  if (sortedPassages.length === 0) {
+    problemDiv.innerHTML = '<p>Not enough oral rounds done to get personalization.</p>';
+  } else {
+    const topList = sortedPassages.slice(0, 10);
+    const listHtml = topList.map(([ref, stats]) =>
+      `<li>${ref} – ${stats.roundsWithErrors} round${stats.roundsWithErrors !== 1 ? 's' : ''}, ${stats.totalErrors} error${stats.totalErrors !== 1 ? 's' : ''}</li>`
+    ).join('');
+    problemDiv.innerHTML = `<ul>${listHtml}</ul>`;
+  }
+}
+
+$("highscoreBtnStart").addEventListener('click', renderHighscores);
+$("highscoreBtnResults").addEventListener('click', renderHighscores);
+$("backFromHighscores").addEventListener('click', () => { $("highscores").hidden = true; $("setup").hidden = false; });
+
+// Add navigation to highscore page
+const highscoreBtn = document.createElement('button');
+highscoreBtn.className = 'btn-primary';
+highscoreBtn.id = 'highscoreBtn';
+highscoreBtn.textContent = 'View Highscores';
+$("results").querySelector('.results-actions').appendChild(highscoreBtn);
+$("highscoreBtn").addEventListener('click', ()=>{ window.location.href = 'highscores.html'; });
 
 /* ---------- starfield background ---------- */
 (function initStarfield(){
@@ -1053,4 +1429,5 @@ if(SpeechRecognitionCtor){ $("micBtn").hidden = false; }
 })();
 // Run the IP greeting lookup when the page finishes loading.
 showVisitorIp();
+maybeShowNightMessage();
 </script>
