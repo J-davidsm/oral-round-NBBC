@@ -285,6 +285,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
         </div>
         <div class="controls-right">
           <span class="score-live">This passage: <b id="liveScore">25</b>/25</span>
+          <button class="btn-secondary" id="abandonBtn" type="button">Back</button>
           <button class="btn-primary" id="nextBtn">Next passage →</button>
         </div>
       </div>
@@ -627,6 +628,7 @@ let state = {
   // Each record will hold {ref, errors, points, wrongIndices, insertIndices, reached}
   records:[], timeLeft:0, timerId:null, finished:false,
   listening:false, voiceMode:false, voiceFinal:"", expectedNorm:[],
+  voiceSequenceStep:"idle", promptIndex:0,
   // Holds location‑specific UI tweaks
   recommendedDivisions: []
 };
@@ -763,7 +765,7 @@ function speakCurrentPassage(){
   const p = currentPassage();
   if(!p) return;
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(`${p.ref}. ${p.text}`);
+  const utterance = new SpeechSynthesisUtterance(`Reference: ${p.ref}`);
   utterance.lang = 'en-US';
   utterance.rate = 0.96;
   utterance.pitch = 1;
@@ -855,6 +857,78 @@ function finalizeCurrent(){
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognizer = null;
 
+function speakReferenceOnly(){
+  if(!('speechSynthesis' in window)) return;
+  const p = currentPassage();
+  if(!p) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(`Reference: ${p.ref}`);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.96;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
+function speakNextPassageWord(){
+  if(!currentPassage()) return;
+  const words = currentPassage().text.trim().split(/\s+/);
+  if(state.promptIndex >= words.length){
+    const endUtterance = new SpeechSynthesisUtterance('End of passage');
+    endUtterance.lang = 'en-US';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(endUtterance);
+    return;
+  }
+  const nextWord = words[state.promptIndex++];
+  const utterance = new SpeechSynthesisUtterance(nextWord);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.92;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
+function restartCurrentPassage(){
+  const status = $("voiceStatus");
+  state.wrongSet = new Set();
+  state.insertSet = new Set();
+  state.voiceFinal = "";
+  state.promptIndex = 0;
+  state.voiceSequenceStep = "awaiting-ref";
+  document.querySelectorAll(".word.wrong").forEach(el => el.classList.remove("wrong"));
+  document.querySelectorAll(".gap.insert").forEach(el => el.classList.remove("insert"));
+  updateLiveScore();
+  speakReferenceOnly();
+  status.textContent = "Passage restarted. Say the reference and recite again.";
+}
+
+function referenceMatchesTranscript(transcript){
+  const p = currentPassage();
+  if(!p) return false;
+  const refWords = normalizeTranscript(p.ref);
+  const spoken = normalizeTranscript(transcript);
+  if(!refWords.length || !spoken.length) return false;
+  const refText = refWords.join(" ");
+  const spokenText = spoken.join(" ");
+  if(spokenText.includes(refText)) return true;
+  return refWords.every(word => spokenText.includes(word));
+}
+
+function moveToNextVoicePassage(){
+  stopListening();
+  if(state.finished) return;
+  goNext();
+  if(state.finished) return;
+  setTimeout(()=>{
+    speakReferenceOnly();
+    setTimeout(()=>{
+      if(!state.finished) startListening();
+    }, 1300);
+  }, 600);
+}
+
 function normWord(w){ return w.toLowerCase().replace(/[^a-z0-9']/g,""); }
 function normalizeTranscript(str){ return str.toLowerCase().replace(/[^a-z0-9' ]/g," ").split(/\s+/).filter(Boolean); }
 
@@ -905,18 +979,69 @@ function handleVoiceResult(event){
     if(event.results[i].isFinal) state.voiceFinal += chunk + " ";
     else interim += chunk;
   }
-  const heard = normalizeTranscript(state.voiceFinal + " " + interim);
-  const {matched, insertBefore} = alignWords(state.expectedNorm, heard);
-  applyVoiceMarks(matched, insertBefore);
+  const fullTranscript = (state.voiceFinal + " " + interim).trim();
+  const heard = normalizeTranscript(fullTranscript);
   const status = $("voiceStatus");
   status.classList.remove("err");
+
+  const spokenLower = fullTranscript.toLowerCase();
+  if(/\bprompt\b/.test(spokenLower)){
+    const promptText = spokenLower.replace(/\bprompt\b/g, "").trim();
+    if(!promptText) {
+      speakNextPassageWord();
+      status.textContent = "Next word spoken.";
+    }
+    return;
+  }
+
+  if(/\brestart\b/.test(spokenLower)){
+    restartCurrentPassage();
+    return;
+  }
+
+  if(state.voiceSequenceStep === "awaiting-ref"){
+    if(referenceMatchesTranscript(fullTranscript)){
+      state.voiceSequenceStep = "awaiting-passage";
+      status.textContent = "Reference heard. Now recite the passage.";
+    } else {
+      status.innerHTML = interim ? `Say the reference… <b>${interim.trim()}</b>` : "Say the reference to begin.";
+    }
+    return;
+  }
+
+  if(state.voiceSequenceStep === "awaiting-passage" || state.voiceSequenceStep === "awaiting-finalref"){
+    const {matched, insertBefore} = alignWords(state.expectedNorm, heard);
+    applyVoiceMarks(matched, insertBefore);
+    status.innerHTML = interim ? `Listening… <b>${interim.trim()}</b>` : (heard.length ? "Listening…" : "Listening — start reciting.");
+
+    if(heard.length >= Math.max(8, state.expectedNorm.length * 0.6)){
+      state.voiceSequenceStep = "awaiting-finalref";
+      status.textContent = "Passage heard. Say the reference again to continue.";
+    }
+
+    if(state.voiceSequenceStep === "awaiting-finalref" && referenceMatchesTranscript(fullTranscript) && heard.length >= Math.max(8, state.expectedNorm.length * 0.6)){
+      state.voiceSequenceStep = "done";
+      status.textContent = "Reference heard. Moving to the next passage…";
+      setTimeout(() => moveToNextVoicePassage(), 1100);
+    }
+    return;
+  }
+
+  const {matched, insertBefore} = alignWords(state.expectedNorm, heard);
+  applyVoiceMarks(matched, insertBefore);
   status.innerHTML = interim ? `Listening… <b>${interim.trim()}</b>` : (heard.length ? "Listening…" : "Listening — start reciting.");
 }
 
 function setMicUI(listening){
   const btn = $("micBtn");
-  btn.classList.toggle("listening", listening);
-  $("micBtnLabel").textContent = listening ? "Stop listening" : "Listen & auto-mark";
+  if(btn) btn.classList.toggle("listening", listening);
+  if($("micBtnLabel")) $("micBtnLabel").textContent = listening ? "Stop listening" : "Listen & auto-mark";
+  const voiceBtn = $("voiceModeBtn");
+  if(voiceBtn){
+    voiceBtn.textContent = listening ? "Stop listening" : "Listen & auto-mark";
+    voiceBtn.classList.toggle("active", listening);
+    voiceBtn.setAttribute("aria-pressed", String(listening));
+  }
 }
 
 // Extra context appended to permission errors — the two most common reasons
@@ -951,10 +1076,6 @@ async function startListening(){
     return;
   }
 
-  // Preflight through getUserMedia: it gives specific, real error names
-  // (NotAllowedError, NotFoundError, NotReadableError…) instead of the
-  // single generic "not-allowed" string SpeechRecognition reports, so the
-  // message can actually say what's wrong.
   if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
     status.textContent = "Requesting microphone access…";
     try{
@@ -975,9 +1096,6 @@ async function startListening(){
     }
   }
 
-  // A fresh instance every time: a recognizer that has already hit a
-  // permission error can keep replaying that same error on reuse even
-  // after access is actually granted, which is why this never caches one.
   recognizer = new SpeechRecognitionCtor();
   recognizer.continuous = true;
   recognizer.interimResults = true;
@@ -988,6 +1106,7 @@ async function startListening(){
       status.classList.add("err");
       status.textContent = "Microphone access was blocked." + embedHint() + fileHint();
       state.listening = false;
+      state.voiceSequenceStep = "idle";
       setMicUI(false);
     } else if(e.error!=="no-speech" && e.error!=="aborted"){
       status.classList.add("err");
@@ -999,11 +1118,18 @@ async function startListening(){
   };
 
   try{
-    recognizer.start();
     state.listening = true;
+    state.voiceFinal = "";
+    state.voiceSequenceStep = "awaiting-ref";
     setMicUI(true);
+    speakReferenceOnly();
     status.classList.remove("err");
-    status.textContent = "Listening — start reciting.";
+    status.textContent = "Reference read. Say the reference to begin.";
+    setTimeout(()=>{
+      if(state.listening && recognizer){
+        try{ recognizer.start(); }catch(err){}
+      }
+    }, 900);
   }catch(err){
     status.classList.add("err");
     status.textContent = "Couldn't start the microphone. Try again, or mark by hand.";
@@ -1012,6 +1138,8 @@ async function startListening(){
 
 function stopListening(){
   state.listening = false;
+  state.voiceSequenceStep = "idle";
+  state.voiceFinal = "";
   if(recognizer){ try{ recognizer.stop(); }catch(err){} }
   const btn = $("micBtn");
   if(btn) setMicUI(false);
@@ -1185,6 +1313,25 @@ function finishRound(){
   }
 }
 
+function abandonCurrentRound(){
+  stopListening();
+  if(state.timerId){ clearInterval(state.timerId); state.timerId = null; }
+  if('speechSynthesis' in window){ window.speechSynthesis.cancel(); }
+  state.finished = false;
+  state.records = [];
+  state.round = [];
+  state.currentIndex = 0;
+  state.timeLeft = 0;
+  state.wrongSet = new Set();
+  state.insertSet = new Set();
+  state.voiceFinal = "";
+  state.voiceSequenceStep = "idle";
+  $("round").hidden = true;
+  $("hud").hidden = true;
+  $("results").hidden = true;
+  $("setup").hidden = false;
+}
+
 function backToSetup(){
   $("results").hidden = true;
   $("round").hidden = true;
@@ -1209,11 +1356,10 @@ wireTimerStepper();
 $("startBtn").addEventListener("click", startRound);
 $("nextBtn").addEventListener("click", goNext);
 $("clearBtn").addEventListener("click", clearMarks);
+$("abandonBtn").addEventListener("click", abandonCurrentRound);
 $("againBtn").addEventListener("click", backToSetup);
 $("micBtn").addEventListener("click", toggleListening);
-$("voiceModeBtn").addEventListener("click", ()=>{
-  setVoiceMode(!state.voiceMode);
-});
+$("voiceModeBtn").addEventListener("click", toggleListening);
 if(SpeechRecognitionCtor){ $("micBtn").hidden = false; }
 
 // ---------- Highscore view handling ----------
