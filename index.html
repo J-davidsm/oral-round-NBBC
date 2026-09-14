@@ -589,21 +589,15 @@ async function showVisitorIp(){
     if(!locResp.ok) throw new Error('Location fetch failed');
     const loc = await locResp.json();
 
-    // Keep the IP fetch, but force the detected location to Rockford, Illinois so the
-    // Rockford-specific message always appears for this scenario.
-    loc.city = 'Rockford';
-    loc.region = 'IL';
-    loc.country = 'US';
-
-    // Custom handling for Rockford, Illinois
-    if(loc.city === 'Rockford' && (loc.region === 'IL' || loc.region === 'Illinois')){
-      el.textContent = "This program has identified you as a Krown. The Senior division will be recommended for you.";
-      // Recommend Senior division
-      state.recommendedDivisions = ['senior'];
-      // Set the Rockford-specific title in the startup overlay
+    // Use the actual detected IP location again.
+    if(loc.city === 'Geneva' && (loc.region === 'IL' || loc.region === 'Illinois')){
+      el.textContent = "Hello Mums! Maybe just maybe this'll be the time EZ or N gets a perfect oral!";
+      // Recommend Primary and Junior divisions
+      state.recommendedDivisions = ['primary','junior'];
+      // Set the Geneva-specific title in the startup overlay
       const genevaEl = document.getElementById('genevaTitle');
       if(genevaEl){
-        genevaEl.textContent = "This program has identified you as a Krown. The Senior division will be recommended for you.";
+        genevaEl.textContent = "This program has identified you as a Davidsmeier. The Junior and Primary divisions will be recommended for you.";
         genevaEl.hidden = false;
       }
     } else {
