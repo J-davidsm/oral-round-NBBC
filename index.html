@@ -99,7 +99,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
 .btn-primary:disabled{opacity:.45;cursor:not-allowed;}
 .btn-secondary{display:inline-flex;align-items:center;gap:6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:11px 20px;font-size:.92rem;font-weight:600;cursor:pointer;}
 .btn-secondary:hover{border-color:var(--accent);}
-.btn-text{background:none;border:none;color:var(--ink-soft);font-size:.85rem;cursor:pointer;text-decoration:underline;text-underline-offset:3px;padding:4px;}
+.btn-secondary.active{border-color:var(--insert);background:var(--insert-soft);color:var(--insert);} 
 .btn-text:hover{color:var(--accent);}
 
 /* ----- startup overlay ----- */
@@ -280,6 +280,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
       <div class="passage-controls">
         <div class="controls-left">
           <button class="btn-mic" id="micBtn" hidden><span class="dot"></span><span id="micBtnLabel">Listen &amp; auto-mark</span></button>
+          <button class="btn-secondary" id="voiceModeBtn" type="button" aria-pressed="false">Voice mode: off</button>
           <button class="btn-text" id="clearBtn">Clear marks on this passage</button>
         </div>
         <div class="controls-right">
@@ -625,7 +626,7 @@ let state = {
   wrongSet:new Set(), insertSet:new Set(),
   // Each record will hold {ref, errors, points, wrongIndices, insertIndices, reached}
   records:[], timeLeft:0, timerId:null, finished:false,
-  listening:false, voiceFinal:"", expectedNorm:[],
+  listening:false, voiceMode:false, voiceFinal:"", expectedNorm:[],
   // Holds location‑specific UI tweaks
   recommendedDivisions: []
 };
@@ -741,6 +742,35 @@ function updateTimerDisplay(){
 
 function currentPassage(){ return state.round[state.currentIndex]; }
 
+function setVoiceMode(enabled){
+  state.voiceMode = enabled;
+  const btn = $("voiceModeBtn");
+  if(btn){
+    btn.textContent = enabled ? "Voice mode: on" : "Voice mode: off";
+    btn.setAttribute("aria-pressed", String(enabled));
+    btn.classList.toggle("active", enabled);
+  }
+  if(!enabled && 'speechSynthesis' in window){
+    window.speechSynthesis.cancel();
+  }
+  if(enabled){
+    speakCurrentPassage();
+  }
+}
+
+function speakCurrentPassage(){
+  if(!state.voiceMode || !('speechSynthesis' in window)) return;
+  const p = currentPassage();
+  if(!p) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(`${p.ref}. ${p.text}`);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.96;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
 function renderPassage(){
   stopListening();
   state.wrongSet = new Set();
@@ -785,6 +815,9 @@ function renderPassage(){
   $("upnext").innerHTML = nextP ? `Up next: <b>${nextP.ref}</b>` : `Final passage of the round`;
   $("nextBtn").textContent = state.currentIndex===11 ? "Finish round →" : "Next passage →";
   updateLiveScore();
+  if(state.voiceMode){
+    setTimeout(()=>speakCurrentPassage(), 200);
+  }
 }
 
 function toggleWord(i,el){
@@ -1011,6 +1044,7 @@ function clearMarks(){
 function finishRound(){
   if(state.finished) return;
   stopListening();
+  if('speechSynthesis' in window){ window.speechSynthesis.cancel(); }
   state.finished = true;
   clearInterval(state.timerId);
   $("round").hidden = true;
@@ -1177,6 +1211,9 @@ $("nextBtn").addEventListener("click", goNext);
 $("clearBtn").addEventListener("click", clearMarks);
 $("againBtn").addEventListener("click", backToSetup);
 $("micBtn").addEventListener("click", toggleListening);
+$("voiceModeBtn").addEventListener("click", ()=>{
+  setVoiceMode(!state.voiceMode);
+});
 if(SpeechRecognitionCtor){ $("micBtn").hidden = false; }
 
 // ---------- Highscore view handling ----------
