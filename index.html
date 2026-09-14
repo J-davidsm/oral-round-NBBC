@@ -62,8 +62,12 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
 .hud-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:6px 14px;display:flex;flex-direction:column;align-items:center;min-width:66px;box-shadow:var(--shadow);}
 .hud-label{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;}
 .hud-value{font-size:1.05rem;font-weight:600;color:var(--ink);}
+.timer-box{ --timer-progress: 1; --timer-color: #28a745; position:relative; width:88px; height:88px; min-width:88px; border-radius:50%; padding:0; background:conic-gradient(from 270deg, var(--timer-color) calc(var(--timer-progress) * 360deg), rgba(28,34,51,.08) 0deg); display:grid; place-items:center; overflow:hidden;}
+.timer-box::before{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--surface);border:1px solid var(--border);}
+.timer-box .hud-label,.timer-box .hud-value{position:relative;z-index:1;}
+.timer-box .hud-value{display:block;line-height:1.1;}
 .timer-box.low .hud-value{color:var(--error);}
-.timer-box.low{border-color:var(--error);}
+.timer-box.low{border-color:var(--error); filter:drop-shadow(0 0 6px rgba(220,53,69,.18));}
 
 /* ---------- setup ---------- */
 #setup .intro{max-width:60ch;margin-bottom:30px;}
@@ -271,6 +275,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
     <section id="round" hidden>
       <div class="round-topline">
         <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        <button class="btn-primary" id="nextBtn">Next passage →</button>
       </div>
       <div class="passage-card">
         <div class="ref-line" id="refTop"></div>
@@ -286,7 +291,6 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
         <div class="controls-right">
           <span class="score-live">This passage: <b id="liveScore">25</b>/25</span>
           <button class="btn-secondary" id="abandonBtn" type="button">Back</button>
-          <button class="btn-primary" id="nextBtn">Next passage →</button>
         </div>
       </div>
       <div class="voice-status" id="voiceStatus"></div>
@@ -739,8 +743,15 @@ function tick(){
 }
 
 function updateTimerDisplay(){
-  $("timerDisplay").textContent = fmtTime(Math.max(0,state.timeLeft));
-  $("timerBox").classList.toggle("low", state.timeLeft<=30);
+  const timerDisplay = $("timerDisplay");
+  const timerBox = $("timerBox");
+  const totalSeconds = Math.max(1, state.minutes * 60);
+  const remainingRatio = Math.max(0, Math.min(1, state.timeLeft / totalSeconds));
+  const hue = 120 - (1 - remainingRatio) * 120;
+  timerDisplay.textContent = fmtTime(Math.max(0,state.timeLeft));
+  timerBox.style.setProperty("--timer-progress", String(remainingRatio));
+  timerBox.style.setProperty("--timer-color", `hsl(${hue} 72% 46%)`);
+  timerBox.classList.toggle("low", state.timeLeft<=30);
 }
 
 function currentPassage(){ return state.round[state.currentIndex]; }
@@ -1351,6 +1362,18 @@ if (startupClose) {
     hideStartupPersonalMessage();
   });
 }
+
+window.addEventListener("keydown", (event) => {
+  const activeTag = document.activeElement && document.activeElement.tagName;
+  const isTyping = activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT";
+  if (isTyping) return;
+  if (event.key === "ArrowRight") {
+    event.preventDefault();
+    if (!$("round").hidden && !state.finished) {
+      goNext();
+    }
+  }
+});
 
 renderDivisions();
 wireTimerStepper();
