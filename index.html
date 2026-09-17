@@ -1562,13 +1562,14 @@ $("highscoreBtnStart").addEventListener('click', renderHighscores);
 $("highscoreBtnResults").addEventListener('click', renderHighscores);
 $("backFromHighscores").addEventListener('click', () => { $("highscores").hidden = true; $("setup").hidden = false; });
 
-// Add navigation to highscore page
+// Add navigation to the in‑page highscore view (no external file needed)
 const highscoreBtn = document.createElement('button');
 highscoreBtn.className = 'btn-primary';
 highscoreBtn.id = 'highscoreBtn';
 highscoreBtn.textContent = 'View Highscores';
-$("results").querySelector('.results-actions').appendChild(highscoreBtn);
-$("highscoreBtn").addEventListener('click', ()=>{ window.location.href = 'highscores.html'; });
+$('results').querySelector('.results-actions').appendChild(highscoreBtn);
+// Open the highscore section using the existing renderHighscores function.
+$('highscoreBtn').addEventListener('click', renderHighscores);
 
 /* ---------- starfield background ---------- */
 (function initStarfield(){
