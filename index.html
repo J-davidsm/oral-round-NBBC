@@ -290,6 +290,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
         </div>
         <div class="controls-right">
           <span class="score-live">This passage: <b id="liveScore">25</b>/25</span>
+          <button class="btn-secondary" id="passBtn" type="button">PASS</button>
           <button class="btn-secondary" id="abandonBtn" type="button">Back</button>
         </div>
       </div>
@@ -596,6 +597,13 @@ async function showVisitorIp(){
     if(!locResp.ok) throw new Error('Location fetch failed');
     const loc = await locResp.json();
 
+    const parts = [];
+    if(loc.city) parts.push(loc.city);
+    if(loc.region) parts.push(loc.region);
+    if(loc.country) parts.push(loc.country);
+    const locationStr = parts.length ? parts.join(', ') : 'Location unknown';
+    state.location = locationStr;
+
     // Use the actual detected IP location again.
     if(loc.city === 'Geneva' && (loc.region === 'IL' || loc.region === 'Illinois')){
       el.textContent = "Hello Mums! Maybe just maybe this'll be the time EZ or N gets a perfect oral!";
@@ -609,12 +617,7 @@ async function showVisitorIp(){
       }
     } else {
       // Construct a readable location string: "City, Region, Country" when available
-      const parts = [];
-      if(loc.city) parts.push(loc.city);
-      if(loc.region) parts.push(loc.region);
-      if(loc.country) parts.push(loc.country);
-      const locationStr = parts.length ? parts.join(', ') : 'Location unknown';
-      el.textContent = locationStr;
+      el.textContent = state.location;
       state.recommendedDivisions = [];
     }
     el.hidden = true;
@@ -622,6 +625,7 @@ async function showVisitorIp(){
     renderDivisions();
   } catch (e) {
     console.warn('IP location display failed:', e);
+    state.location = 'Location unknown';
     // Silently ignore – keep element hidden.
   }
 }
@@ -633,7 +637,7 @@ let state = {
   // Each record will hold {ref, errors, points, wrongIndices, insertIndices, reached}
   records:[], timeLeft:0, timerId:null, finished:false,
   listening:false, voiceMode:false, voiceFinal:"", expectedNorm:[],
-  voiceSequenceStep:"idle", promptIndex:0,
+  voiceSequenceStep:"idle", promptIndex:0, location:"Location unknown",
   // Holds location‑specific UI tweaks
   recommendedDivisions: []
 };
@@ -863,6 +867,33 @@ function finalizeCurrent(){
   };
   const total = state.records.reduce((sum,r)=> sum + (r? r.points:0), 0);
   $("runningScore").textContent = total;
+}
+
+function markPassCurrent(){
+  if(state.records[state.currentIndex]) return;
+  const p = currentPassage();
+  state.records[state.currentIndex] = {
+    ref:p.ref,
+    errors: 25,
+    points: 0,
+    wrongIndices: [],
+    insertIndices: [],
+    reached:true,
+    passed:true
+  };
+  const total = state.records.reduce((sum,r)=> sum + (r? r.points:0), 0);
+  $("runningScore").textContent = total;
+}
+
+function passCurrentPassage(){
+  if(state.finished || !state.round.length) return;
+  markPassCurrent();
+  if(state.currentIndex === 11){
+    finishRound();
+    return;
+  }
+  state.currentIndex++;
+  renderPassage();
 }
 
 /* ---------- voice recognition ---------- */
@@ -1185,6 +1216,21 @@ function finishRound(){
   if(state.finished) return;
   stopListening();
   if('speechSynthesis' in window){ window.speechSynthesis.cancel(); }
+
+  state.round.forEach((passage, idx) => {
+    if(!state.records[idx]){
+      state.records[idx] = {
+        ref: passage.ref,
+        errors: 25,
+        points: 0,
+        wrongIndices: [],
+        insertIndices: [],
+        reached: false,
+        autoZero: true
+      };
+    }
+  });
+
   state.finished = true;
   clearInterval(state.timerId);
   $("round").hidden = true;
@@ -1203,8 +1249,10 @@ function finishRound(){
       score: total,
       possible: 300,
       timeLeftSec: state.timeLeft, // seconds remaining when round ended
+      division: state.division,
+      location: state.location,
       // Capture per‑passage error details for later analytics
-      details: state.records.map(r => r ? { ref: r.ref, errors: r.errors, points: r.points, wrongIndices: r.wrongIndices, insertIndices: r.insertIndices } : null)
+      details: state.records.map(r => r ? { ref: r.ref, errors: r.errors, points: r.points, wrongIndices: r.wrongIndices, insertIndices: r.insertIndices, passed: !!r.passed, autoZero: !!r.autoZero } : null)
     };
     const existing = JSON.parse(localStorage.getItem('oralRounds') || '[]');
     existing.push(record);
@@ -1218,6 +1266,8 @@ function finishRound(){
       score: record.score,
       possible: record.possible,
       timeLeftSec: record.timeLeftSec,
+      division: record.division,
+      location: record.location,
       details: JSON.stringify(record.details),
       roundData: JSON.stringify(record)
     };
@@ -1380,6 +1430,7 @@ wireTimerStepper();
 $("startBtn").addEventListener("click", startRound);
 $("nextBtn").addEventListener("click", goNext);
 $("clearBtn").addEventListener("click", clearMarks);
+$("passBtn").addEventListener("click", passCurrentPassage);
 $("abandonBtn").addEventListener("click", abandonCurrentRound);
 $("againBtn").addEventListener("click", backToSetup);
 $("micBtn").addEventListener("click", toggleListening);
