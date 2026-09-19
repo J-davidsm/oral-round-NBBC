@@ -741,9 +741,39 @@ function tick(){
   state.timeLeft--;
   updateTimerDisplay();
   if(state.timeLeft<=0){
-    finalizeCurrent();
+    // Timer expired: mark all remaining passages (including current) as zero
+    zeroRemainingPassages();
     finishRound();
   }
+}
+
+// Assign zero score to any passages that have not been finalized yet.
+function zeroRemainingPassages(){
+  // Ensure records array exists and has length 12
+  if(!state.records || state.records.length !== 12){
+    state.records = new Array(12).fill(null);
+  }
+  for(let i = state.currentIndex; i < 12; i++){
+    // If already recorded (e.g., user passed), keep it; otherwise set zero.
+    if(state.records[i]) continue;
+    const p = state.round[i];
+    if(!p) continue;
+    // Assign a full‑error zero: 25 errors (max) and 0 points.
+    // Mark as reached because the timer elapsed while on this passage.
+    // autoZero flag indicates the score was auto‑assigned due to timeout.
+    state.records[i] = {
+      ref: p.ref,
+      errors: 25,
+      points: 0,
+      wrongIndices: [],
+      insertIndices: [],
+      reached: true,
+      autoZero: true
+    };
+  }
+  // Update running total display
+  const total = state.records.reduce((sum, r) => sum + (r ? r.points : 0), 0);
+  if($("runningScore")) $("runningScore").textContent = total;
 }
 
 function updateTimerDisplay(){
@@ -1466,8 +1496,29 @@ function renderHighscores(){
     <p>Total points across all rounds: <span style="color:var(--gold)">${totalPoints}</span> / ${totalPossible}</p>
     <p>Overall percentage: <span style="color:var(--gold)">${overallPct}%</span></p>`;
 
+  // ------------------------------------------------------------
+  // Division filter UI – add simple navigation links for each division
+  // ------------------------------------------------------------
+  const divisionNav = document.createElement('div');
+  divisionNav.style.marginBottom = '12px';
+  ['primary','junior','senior'].forEach(div => {
+    const link = document.createElement('a');
+    link.href = `${window.location.pathname}?division=${div}`;
+    link.textContent = div.charAt(0).toUpperCase() + div.slice(1);
+    link.style.marginRight = '8px';
+    link.style.color = 'var(--accent)';
+    link.style.textDecoration = 'underline';
+    divisionNav.appendChild(link);
+  });
+  overall.prepend(divisionNav);
+
+  // Apply division filter if present in URL query string
+  const urlParams = new URLSearchParams(window.location.search);
+  const filterDiv = urlParams.get('division');
+  const filteredData = filterDiv ? data.filter(r => r.division === filterDiv) : data;
+
   // All rounds table
-  const rows = data.map(r=>{
+  const rows = filteredData.map(r=>{
     const date = new Date(r.date).toLocaleString();
     const pct = ((r.score/r.possible)*100).toFixed(1);
     const mins = String(Math.floor(r.timeLeftSec/60)).padStart(2,'0');
@@ -1477,7 +1528,7 @@ function renderHighscores(){
   allRounds.innerHTML = `<table class="table"><thead><tr><th>Date</th><th>Score</th><th>Possible</th><th>%</th><th>Time Left</th></tr></thead><tbody>${rows}</tbody></table>`;
 
   // Not a real oral round (>=7 minutes left)
-  const notRealData = data.filter(r=> r.timeLeftSec >= 7*60);
+  const notRealData = filteredData.filter(r=> r.timeLeftSec >= 7*60);
   if(notRealData.length){
     const nrRows = notRealData.map(r=>{
       const date = new Date(r.date).toLocaleString();
@@ -1492,7 +1543,7 @@ function renderHighscores(){
 
   // ----- Round summary list with pie charts -----
   // For each round, show date, score and a color‑coded pie representing the percentage.
-  const roundItems = data.map(r=>{
+  const roundItems = filteredData.map(r=>{
     const date = new Date(r.date).toLocaleString();
     const pct = Math.min(100, Math.round((r.score / r.possible) * 100));
     // Determine color based on thresholds
