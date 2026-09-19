@@ -166,6 +166,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
 .passage-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:34px 36px 30px;box-shadow:var(--shadow);}
 .ref-line{text-align:center;font-family:"Fraunces",serif;font-weight:600;font-size:1.05rem;color:var(--accent);letter-spacing:.01em;margin-bottom:20px;}
 .ref-line.bottom{margin-top:22px;margin-bottom:0;padding-top:20px;border-top:1px solid var(--border-soft);}
+.ref-error{color:var(--error);text-decoration:underline;cursor:pointer;}
 .passage-text{font-family:"Source Serif 4",Georgia,serif;font-size:1.28rem;line-height:2.3;color:var(--ink);max-width:66ch;margin:0 auto;text-align:left;}
 .word{cursor:pointer;border-radius:5px;padding:3px 4px;transition:background .1s,color .1s;}
 .word:hover{background:var(--surface-2);}
@@ -653,37 +654,6 @@ function shuffled(arr){
   return a;
 }
 
-function renderDivisions(){
-  const wrap = $("divisions");
-  wrap.innerHTML = "";
-  DIVISIONS.forEach(d=>{
-    const pool = DATA[d.key];
-    const label = document.createElement("label");
-    label.className = "divcard";
-    // Highlight if this division is recommended for the detected location
-    const isRec = state.recommendedDivisions.includes(d.key);
-    if(isRec){
-      label.style.borderColor = "var(--gold)";
-    }
-    label.innerHTML = `
-      <input type="radio" name="division" value="${d.key}">
-      <div class="divcard-top"><span class="divcard-name">${d.label}</span><span class="divcard-check"></span></div>
-      <div class="divcard-limit">${d.limit} &middot; ${d.note}</div>
-      <div class="divcard-pool">${pool.length} passages in the pool</div>`;
-    if(isRec){
-      const badge = document.createElement('div');
-      badge.className = 'recommended-badge';
-      badge.textContent = 'Recommended division';
-      label.appendChild(badge);
-    }
-    label.querySelector("input").addEventListener("change", ()=>{
-      state.division = d.key;
-      $("startBtn").disabled = false;
-    });
-    wrap.appendChild(label);
-  });
-}
-
 function fmtTime(sec){
   const m = Math.floor(sec/60), s = sec%60;
   return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
@@ -827,8 +797,37 @@ function renderPassage(){
   $("voiceStatus").textContent = "";
   $("voiceStatus").classList.remove("err");
   const p = currentPassage();
-  $("refTop").textContent = p.ref;
-  $("refBottom").textContent = p.ref;
+  // Make reference elements clickable to toggle a reference‑error flag.
+  const refTopEl = $("refTop");
+  const refBottomEl = $("refBottom");
+  const setRefError = (add)=>{
+    state.refError = add;
+    const cls = "ref-error";
+    if(add){
+      refTopEl.classList.add(cls);
+      refBottomEl.classList.add(cls);
+    } else {
+      refTopEl.classList.remove(cls);
+      refBottomEl.classList.remove(cls);
+    }
+    updateLiveScore();
+  };
+  const toggleRefError = ()=> setRefError(!state.refError);
+  // Initialize flag if undefined
+  if(state.refError===undefined) state.refError = false;
+  // Attach click listeners (only once)
+  if(!refTopEl.dataset.clickBound){
+    refTopEl.addEventListener("click", toggleRefError);
+    refTopEl.dataset.clickBound = "1";
+  }
+  if(!refBottomEl.dataset.clickBound){
+    refBottomEl.addEventListener("click", toggleRefError);
+    refBottomEl.dataset.clickBound = "1";
+  }
+  // Apply current visual state
+  setRefError(state.refError);
+  refTopEl.textContent = p.ref;
+  refBottomEl.textContent = p.ref;
   $("passageNum").textContent = state.currentIndex+1;
   $("progressFill").style.width = (state.currentIndex/12*100)+"%";
 
@@ -879,7 +878,11 @@ function toggleGap(i,el){
   updateLiveScore();
 }
 
-function currentErrors(){ return state.wrongSet.size + state.insertSet.size; }
+// Compute total errors for the passage, including a possible reference error.
+function currentErrors(){
+  const base = state.wrongSet.size + state.insertSet.size;
+  return base + (state.refError ? 1 : 0);
+}
 function currentScore(){ return Math.max(0, 25 - 5*currentErrors()); }
 
 function updateLiveScore(){ $("liveScore").textContent = currentScore(); }
@@ -1495,6 +1498,21 @@ function renderHighscores(){
   overall.innerHTML = `<p>Highest single‑round score: <span style="color:var(--gold)">${highestScore}</span></p>
     <p>Total points across all rounds: <span style="color:var(--gold)">${totalPoints}</span> / ${totalPossible}</p>
     <p>Overall percentage: <span style="color:var(--gold)">${overallPct}%</span></p>`;
+
+  // ---- Division breakdown (overall, not filtered) ----
+  const divisions = ['primary','junior','senior'];
+  const divRows = divisions.map(div => {
+    const divData = data.filter(r => r.division === div);
+    const points = divData.reduce((s,r) => s + r.score, 0);
+    const possible = divData.length * 300;
+    const pct = possible ? ((points / possible) * 100).toFixed(1) : '0.0';
+    return `<tr><td>${div.charAt(0).toUpperCase()+div.slice(1)}</td><td>${points}</td><td>${possible}</td><td>${pct}%</td></tr>`;
+  }).join('');
+  if(divRows){
+    const table = `<table class="table"><thead><tr><th>Division</th><th>Points</th><th>Possible</th><th>%</th></tr></thead><tbody>${divRows}</tbody></table>`;
+    overall.insertAdjacentHTML('beforeend', `<h3 class="eyebrow" style="margin-top:12px;">Division Breakdown</h3>${table}`);
+  }
+
 
   // ------------------------------------------------------------
   // Division filter UI – add simple navigation links for each division
