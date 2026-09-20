@@ -638,6 +638,7 @@ let state = {
   // Each record will hold {ref, errors, points, wrongIndices, insertIndices, reached}
   records:[], timeLeft:0, timerId:null, finished:false,
   listening:false, voiceMode:false, voiceFinal:"", expectedNorm:[],
+  refErrorTop:false, refErrorBottom:false,
   voiceSequenceStep:"idle", promptIndex:0, location:"Location unknown",
   // Holds location‑specific UI tweaks
   recommendedDivisions: []
@@ -668,6 +669,74 @@ function wireTimerStepper(){
     state.minutes = Math.min(30, state.minutes+1);
     $("timerVal").textContent = state.minutes;
   });
+}
+
+function renderDivisions(){
+  const container = $("divisions");
+  const startBtn = $("startBtn");
+  if (!container) return;
+
+  const recommended = new Set(state.recommendedDivisions || []);
+  container.innerHTML = "";
+
+  DIVISIONS.forEach((division) => {
+    const label = document.createElement("label");
+    label.className = "divcard";
+    label.setAttribute("for", `division-${division.key}`);
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "division";
+    radio.id = `division-${division.key}`;
+    radio.checked = state.division === division.key;
+    radio.addEventListener("change", () => {
+      state.division = division.key;
+      renderDivisions();
+    });
+
+    const card = document.createElement("div");
+    card.className = "divcard-body";
+
+    const top = document.createElement("div");
+    top.className = "divcard-top";
+    const name = document.createElement("div");
+    name.className = "divcard-name";
+    name.textContent = division.label;
+    const check = document.createElement("span");
+    check.className = "divcard-check";
+    top.appendChild(name);
+    top.appendChild(check);
+
+    const limit = document.createElement("div");
+    limit.className = "divcard-limit";
+    limit.textContent = division.limit;
+
+    const note = document.createElement("div");
+    note.className = "divcard-pool";
+    note.textContent = division.note;
+
+    if (recommended.has(division.key)) {
+      const badge = document.createElement("span");
+      badge.className = "recommended-badge";
+      badge.textContent = "Recommended";
+      label.appendChild(badge);
+    }
+
+    label.appendChild(radio);
+    label.appendChild(top);
+    label.appendChild(limit);
+    label.appendChild(note);
+    label.appendChild(card);
+    container.appendChild(label);
+  });
+
+  if (!state.division && DIVISIONS.length) {
+    state.division = DIVISIONS[0].key;
+  }
+
+  if (startBtn) {
+    startBtn.disabled = !state.division;
+  }
 }
 
 function hideStartupPersonalMessage(){
@@ -791,41 +860,44 @@ function speakCurrentPassage(){
 
 function renderPassage(){
   stopListening();
+  state.refErrorTop = false;
+  state.refErrorBottom = false;
   state.wrongSet = new Set();
   state.insertSet = new Set();
   state.voiceFinal = "";
   $("voiceStatus").textContent = "";
   $("voiceStatus").classList.remove("err");
   const p = currentPassage();
-  // Make reference elements clickable to toggle a reference‑error flag.
+  // Make reference elements clickable to toggle their own error flag.
   const refTopEl = $("refTop");
   const refBottomEl = $("refBottom");
-  const setRefError = (add)=>{
-    state.refError = add;
+  const setRefError = (side, add)=>{
+    if(side === "top") state.refErrorTop = !!add;
+    else state.refErrorBottom = !!add;
     const cls = "ref-error";
-    if(add){
-      refTopEl.classList.add(cls);
-      refBottomEl.classList.add(cls);
+    if(side === "top"){
+      if(state.refErrorTop) refTopEl.classList.add(cls);
+      else refTopEl.classList.remove(cls);
     } else {
-      refTopEl.classList.remove(cls);
-      refBottomEl.classList.remove(cls);
+      if(state.refErrorBottom) refBottomEl.classList.add(cls);
+      else refBottomEl.classList.remove(cls);
     }
     updateLiveScore();
   };
-  const toggleRefError = ()=> setRefError(!state.refError);
-  // Initialize flag if undefined
-  if(state.refError===undefined) state.refError = false;
+  const toggleRefErrorTop = ()=> setRefError("top", !state.refErrorTop);
+  const toggleRefErrorBottom = ()=> setRefError("bottom", !state.refErrorBottom);
   // Attach click listeners (only once)
   if(!refTopEl.dataset.clickBound){
-    refTopEl.addEventListener("click", toggleRefError);
+    refTopEl.addEventListener("click", toggleRefErrorTop);
     refTopEl.dataset.clickBound = "1";
   }
   if(!refBottomEl.dataset.clickBound){
-    refBottomEl.addEventListener("click", toggleRefError);
+    refBottomEl.addEventListener("click", toggleRefErrorBottom);
     refBottomEl.dataset.clickBound = "1";
   }
   // Apply current visual state
-  setRefError(state.refError);
+  setRefError("top", state.refErrorTop);
+  setRefError("bottom", state.refErrorBottom);
   refTopEl.textContent = p.ref;
   refBottomEl.textContent = p.ref;
   $("passageNum").textContent = state.currentIndex+1;
@@ -878,10 +950,10 @@ function toggleGap(i,el){
   updateLiveScore();
 }
 
-// Compute total errors for the passage, including a possible reference error.
+// Compute total errors for the passage, including any reference errors.
 function currentErrors(){
   const base = state.wrongSet.size + state.insertSet.size;
-  return base + (state.refError ? 1 : 0);
+  return base + (state.refErrorTop || state.refErrorBottom ? 1 : 0);
 }
 function currentScore(){ return Math.max(0, 25 - 5*currentErrors()); }
 
@@ -896,6 +968,9 @@ function finalizeCurrent(){
     points: currentScore(),
     wrongIndices: Array.from(state.wrongSet),
     insertIndices: Array.from(state.insertSet),
+    refErrorTop: !!state.refErrorTop,
+    refErrorBottom: !!state.refErrorBottom,
+    refError: !!(state.refErrorTop || state.refErrorBottom),
     reached:true
   };
   const total = state.records.reduce((sum,r)=> sum + (r? r.points:0), 0);
@@ -911,6 +986,9 @@ function markPassCurrent(){
     points: 0,
     wrongIndices: [],
     insertIndices: [],
+    refErrorTop: false,
+    refErrorBottom: false,
+    refError: false,
     reached:true,
     passed:true
   };
@@ -1236,10 +1314,14 @@ function goNext(){
 function clearMarks(){
   stopListening();
   state.voiceFinal = "";
+  state.refErrorTop = false;
+  state.refErrorBottom = false;
   $("voiceStatus").textContent = "";
   $("voiceStatus").classList.remove("err");
   document.querySelectorAll(".word.wrong").forEach(el=>el.classList.remove("wrong"));
   document.querySelectorAll(".gap.insert").forEach(el=>el.classList.remove("insert"));
+  $("refTop").classList.remove("ref-error");
+  $("refBottom").classList.remove("ref-error");
   state.wrongSet = new Set();
   state.insertSet = new Set();
   updateLiveScore();
@@ -1258,6 +1340,9 @@ function finishRound(){
         points: 0,
         wrongIndices: [],
         insertIndices: [],
+        refErrorTop: false,
+        refErrorBottom: false,
+        refError: false,
         reached: false,
         autoZero: true
       };
@@ -1285,7 +1370,7 @@ function finishRound(){
       division: state.division,
       location: state.location,
       // Capture per‑passage error details for later analytics
-      details: state.records.map(r => r ? { ref: r.ref, errors: r.errors, points: r.points, wrongIndices: r.wrongIndices, insertIndices: r.insertIndices, passed: !!r.passed, autoZero: !!r.autoZero } : null)
+      details: state.records.map(r => r ? { ref: r.ref, errors: r.errors, points: r.points, wrongIndices: r.wrongIndices, insertIndices: r.insertIndices, refErrorTop: !!r.refErrorTop, refErrorBottom: !!r.refErrorBottom, refError: !!(r.refErrorTop || r.refErrorBottom), passed: !!r.passed, autoZero: !!r.autoZero } : null)
     };
     const existing = JSON.parse(localStorage.getItem('oralRounds') || '[]');
     existing.push(record);
@@ -1378,8 +1463,11 @@ function finishRound(){
       const top = document.createElement("div");
       top.className = "ref-line";
       top.textContent = p.ref;
-      const bottom = top.cloneNode(true);
+      if(rec && rec.refErrorTop){ top.classList.add("ref-error"); }
+      const bottom = document.createElement("div");
       bottom.className = "ref-line bottom";
+      bottom.textContent = p.ref;
+      if(rec && rec.refErrorBottom){ bottom.classList.add("ref-error"); }
       const textDiv = document.createElement("div");
       textDiv.className = "passage-text";
       const words = p.text.trim().split(/\s+/);
