@@ -589,12 +589,9 @@ async function showVisitorIp(){
   const el = document.getElementById('ip-message');
   if(!el) return;
   try {
-    // Get public IP address
-    const ipResp = await fetch('https://api.ipify.org?format=json');
-    if(!ipResp.ok) throw new Error('IP fetch failed');
-    const {ip} = await ipResp.json();
-    // Resolve location via ipinfo.io (basic fields, no API key required)
-    const locResp = await fetch(`https://ipinfo.io/${ip}/json`);
+    // ipapi.is can geolocate the visitor's current public IP directly,
+    // so this replaces the old two-step ipify + ipinfo lookup.
+    const locResp = await fetch('https://api.ipapi.is/');
     if(!locResp.ok) throw new Error('Location fetch failed');
     const loc = await locResp.json();
 
@@ -605,29 +602,26 @@ async function showVisitorIp(){
     const locationStr = parts.length ? parts.join(', ') : 'Location unknown';
     state.location = locationStr;
 
-    // Use the actual detected IP location again.
+    // Preserve the existing Geneva-specific behavior.
     if(loc.city === 'Geneva' && (loc.region === 'IL' || loc.region === 'Illinois')){
       el.textContent = "Hello Mums! Maybe just maybe this'll be the time EZ or N gets a perfect oral!";
-      // Recommend Primary and Junior divisions
       state.recommendedDivisions = ['primary','junior'];
-      // Set the Geneva-specific title in the startup overlay
+
       const genevaEl = document.getElementById('genevaTitle');
       if(genevaEl){
         genevaEl.textContent = "This program has identified you as a Davidsmeier. The Junior and Primary divisions will be recommended for you.";
         genevaEl.hidden = false;
       }
     } else {
-      // Construct a readable location string: "City, Region, Country" when available
       el.textContent = state.location;
       state.recommendedDivisions = [];
     }
+
     el.hidden = true;
-    // Re‑render division buttons so any recommended styling takes effect
     renderDivisions();
   } catch (e) {
     console.warn('IP location display failed:', e);
     state.location = 'Location unknown';
-    // Silently ignore – keep element hidden.
   }
 }
 
