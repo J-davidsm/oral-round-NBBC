@@ -28,11 +28,14 @@ The website continues using browser history until a Worker URL is configured.
 - Opening Highscores or clicking Refresh retrieves the current network's selected
   division. Every statistic and problem-passage list uses that division.
 - On service failure, Highscores explicitly labels its browser-only fallback.
-- Import this browser’s past rounds explicitly shares local history with the
-  current network. Open it from each browser containing older results. Persisted
-  IDs make retries safe. Legacy records without a valid division are skipped.
-- Failed uploads can be retried using Import on the intended network. Local rounds
-  are never silently uploaded on a later visit from a different network.
+- Opening the site automatically imports unsynced local rounds. Highscores waits
+  for import before loading shared history; Refresh retries failures, and reconnecting
+  also triggers a retry. Open each original browser once to import its older scores.
+- Successful uploads are marked locally for this API and are not republished when
+  the device changes networks. Unsynced rounds upload on the next available network.
+- Persisted IDs and server deduplication make interrupted imports safe to retry.
+  Records without a valid division are skipped. Invalid records stay locally;
+  other valid rounds still import and Highscores reports incomplete syncing.
 - Shared passage details contain references, points, and error counts. The original
   local records retain their full per-word detail. Existing Formspree reporting is
   preserved independently of shared-score submission.

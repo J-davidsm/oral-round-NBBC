@@ -5,8 +5,8 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../score-sync.js',import.meta.url),'utf8');
 function client(records=[],url='',fetch=()=>{throw new Error('unexpected network request');}) {
   let stored=JSON.stringify(records);
-  const window={SCORE_API_URL:url};
-  vm.runInNewContext(source,{window,fetch,AbortSignal,crypto,localStorage:{getItem:()=>stored,setItem:(key,value)=>{stored=value;}}});
+  const window={SCORE_API_URL:url,addEventListener:()=>{}};
+  vm.runInNewContext(source.split('// Opening the site')[0],{window,fetch,AbortSignal,crypto,localStorage:{getItem:()=>stored,setItem:(key,value)=>{stored=value;}}});
   return window.ScoreSync;
 }
 test('unconfigured frontend filters local history by division',async()=>{
@@ -28,10 +28,33 @@ test('repeating an import reuses IDs; invalid divisions are skipped',async()=>{
   const api=client([{division:'primary',score:100},{score:50}],'https://scores.example',async(url,options)=>{
     sent.push(JSON.parse(options.body));return {ok:true,json:async()=>({saved:true})};
   });
-  assert.equal(await api.importLocal(),1);assert.equal(await api.importLocal(),1);
-  assert.equal(sent[0].id,sent[1].id);assert.equal(api.local()[0].id,sent[0].id);
+  assert.equal(await api.importLocal(),1);assert.equal(await api.importLocal(),0);
+  assert.equal(sent.length,1);assert.equal(api.local()[0].id,sent[0].id);
 });
 test('network failures surface to the UI without changing local history',async()=>{
   const api=client([{division:'primary',score:100}],'https://scores.example',async()=>({ok:false}));
   await assert.rejects(api.list('primary'));assert.equal(api.local().length,1);
+});
+
+test('concurrent imports share one upload and failed uploads can retry',async()=>{
+  let attempts=0;
+  const api=client([{division:'primary',score:100}],'https://scores.example',async()=>{
+    attempts++; if(attempts===1) throw new Error('Offline');
+    return {ok:true,json:async()=>({saved:true})};
+  });
+  await assert.rejects(api.importLocal());
+  const first=api.importLocal();const second=api.importLocal();
+  assert.equal(first,second);await first;assert.equal(attempts,2);
+  assert.equal(await api.importLocal(),0);
+});
+test('opening the page automatically imports existing rounds',async()=>{
+  let stored=JSON.stringify([{division:'primary',score:100}]);let requests=0;
+  const context={SCORE_API_URL:'https://scores.example',addEventListener:()=>{},AbortSignal,crypto,
+    localStorage:{getItem:()=>stored,setItem:(key,value)=>{stored=value;}},
+    fetch:async()=>{requests++;return {ok:true,json:async()=>({saved:true})};}};
+  context.window=context;
+  vm.runInNewContext(source,context);
+  await context.ScoreSync.importLocal();
+  assert.equal(requests,1);
+  assert.equal(JSON.parse(stored)[0].sharedScoreApi,'https://scores.example');
 });
