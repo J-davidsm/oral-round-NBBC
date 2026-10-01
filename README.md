@@ -24,21 +24,26 @@ The website continues using browser history until a Worker URL is configured.
 
 ## Behavior
 
-- Completed rounds are retained locally and immediately submitted to the API.
-- Opening Highscores or clicking Refresh retrieves the current network's selected
-  division. Every statistic and problem-passage list uses that division.
-- On service failure, Highscores explicitly labels its browser-only fallback.
-- Opening the site automatically imports unsynced local rounds. Highscores waits
-  for import before loading shared history; Refresh retries failures, and reconnecting
-  also triggers a retry. Open each original browser once to import its older scores.
-- Successful uploads are marked locally for this API and are not republished when
-  the device changes networks. Unsynced rounds upload on the next available network.
-- Persisted IDs and server deduplication make interrupted imports safe to retry.
-  Records without a valid division are skipped. Invalid records stay locally;
-  other valid rounds still import and Highscores reports incomplete syncing.
-- Shared passage details contain references, points, and error counts. The original
-  local records retain their full per-word detail. Existing Formspree reporting is
-  preserved independently of shared-score submission.
+- Highscores always renders locally saved `oralRounds` immediately, by division.
+- Sync uploads pending local rounds and downloads all three divisions, adding
+  missing round IDs to local storage. It never replaces or deletes existing rounds.
+- Existing passage details are retained. The original local JSON is backed up once
+  under `oralRoundsBeforeMerge` before the sync client first changes it.
+- On service failure, local scores remain visible. Partially downloaded history is
+  kept; retrying uses stable round IDs to avoid duplicate entries.
+- Opening the site, reconnecting, focusing the page, and clicking Sync scores trigger
+  syncing. Open pages also sync every 30 seconds. A closed device catches up when
+  next opened; a website cannot remotely write to a closed browser's local storage.
+- In Highscores, use Missing scores on another device? to create an eight-digit code
+  on one device and enter it on the other. Sync merges their local histories through
+  Cloudflare. Click Sync scores on both devices or keep both pages open to finish.
+- New device codes contain eight random digits, including possible leading zeroes.
+  Previously issued longer codes remain valid. Keep codes private: they grant read
+  and write access to the linked history.
+- New synced passage details retain per-word error positions and completion flags.
+  Old server records may only contain references, error counts, and points; richer
+  existing local details are never overwritten by those older server copies.
+- Formspree reporting is preserved independently of shared score submission.
 
 ## Network identity and limitations
 
@@ -59,7 +64,7 @@ across IP changes; divisions remain separate. Linking imports local rounds into
 that history without deleting the original copies. Codes grant read/write access
 and should be kept private. Clearing browser storage removes the remembered link.
 
-Device codes use 128 random bits and are sent in a request header, never a URL.
+Device codes are sent in a request header, never a URL.
 
 Keep database credentials and NETWORK_SECRET on the server. CORS restricts browser
 origins but is not user authentication. Submitted practice scores are self-reported.

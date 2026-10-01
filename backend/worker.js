@@ -11,7 +11,17 @@ export function validateRecord(r) {
     if (!d || typeof d.ref !== 'string' || d.ref.length > 120 ||
         !Number.isInteger(d.errors) || d.errors < 0 || d.errors > 10000 ||
         !Number.isInteger(d.points) || d.points < 0 || d.points > 25) throw new Error('Invalid passage');
-    return {ref:d.ref, errors:d.errors, points:d.points};
+    const detail={ref:d.ref, errors:d.errors, points:d.points};
+    for (const key of ['wrongIndices','insertIndices']) {
+      if (d[key]!==undefined) {
+        if (!Array.isArray(d[key]) || d[key].length>1000 || d[key].some(n=>!Number.isInteger(n)||n<0||n>10000)) throw new Error('Invalid marks');
+        detail[key]=d[key];
+      }
+    }
+    for (const key of ['refErrorTop','refErrorBottom','refError','passed','autoZero','reached']) {
+      if (typeof d[key]==='boolean') detail[key]=d[key];
+    }
+    return detail;
   });
   return {id:r.id, date:new Date(r.date).toISOString(), score:r.score, possible:300,
     timeLeftSec:r.timeLeftSec, division:r.division, details};
@@ -44,7 +54,7 @@ export default {
       let network = await networkKey(ip, env.NETWORK_SECRET);
       const link = request.headers.get('X-Score-Link');
       if (link) {
-        if (!/^[a-f0-9]{32}$/.test(link)) return reply({error:'Invalid device code'},400);
+        if (!/^(?:[0-9]{8}|[a-f0-9]{32})$/.test(link)) return reply({error:'Invalid device code'},400);
         const codeHash = await networkKey('device-link:'+link, env.NETWORK_SECRET);
         const row = await env.DB.prepare('SELECT network FROM device_links WHERE code_hash = ?').bind(codeHash).first();
         if (!row) return reply({error:'Device code not found'},403);
@@ -52,10 +62,15 @@ export default {
       }
       if (url.pathname === '/device-link') {
         if (request.method !== 'POST') return reply({error:'Method not allowed'},405);
-        const code = Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
-        const codeHash = await networkKey('device-link:'+code, env.NETWORK_SECRET);
-        await env.DB.prepare('INSERT INTO device_links (code_hash, network) VALUES (?, ?)').bind(codeHash,network).run();
-        return reply({code,historyId:network.slice(0,12)});
+        for (let attempt=0; attempt<10; attempt++) {
+          let random;
+          do { random=crypto.getRandomValues(new Uint32Array(1))[0]; } while(random>=4200000000);
+          const code=String(random % 100000000).padStart(8,'0');
+          const codeHash=await networkKey('device-link:'+code,env.NETWORK_SECRET);
+          const result=await env.DB.prepare('INSERT INTO device_links (code_hash, network) VALUES (?, ?) ON CONFLICT(code_hash) DO NOTHING').bind(codeHash,network).run();
+          if (result.meta.changes===1) return reply({code,historyId:network.slice(0,12)});
+        }
+        return reply({error:'Could not create a code. Please try again.'},503);
       }
       if (request.method === 'GET') {
         const division = url.searchParams.get('division');

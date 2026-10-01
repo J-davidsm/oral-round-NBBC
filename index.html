@@ -319,15 +319,15 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
         <h2 class="eyebrow" style="color:var(--gold);">Highscores</h2>
         <label for="scoreDivision">Division</label>
         <select id="scoreDivision"><option value="primary">Primary</option><option value="junior">Junior</option><option value="senior">Senior</option></select>
-        <button class="btn-primary" id="refreshScores">Refresh scores</button>
+        <button class="btn-primary" id="refreshScores">Sync scores</button>
         <p id="syncStatus" role="status"></p>
         <details style="margin:16px 0;">
           <summary>Missing scores on another device?</summary>
-          <p>On the device showing your full history, create a code. Enter that code on the other device to share the same history, even if your internet addresses differ. Linked devices keep this history on other networks too.</p>
+          <p>On the device showing your full history, create a code. Enter that code on the other device to combine both devices’ saved rounds. Each browser keeps its own copy. Keep both pages open during sync; a closed device catches up next time it opens.</p>
           <button class="btn-primary" id="createDeviceCode">Create device code</button>
           <p id="deviceCodeResult" hidden></p>
           <label for="deviceCodeInput">Code from the other device</label>
-          <input id="deviceCodeInput" type="text" autocomplete="off" spellcheck="false" style="width:min(100%,380px);">
+          <input id="deviceCodeInput" type="text" inputmode="numeric" placeholder="12345678" autocomplete="off" spellcheck="false" style="width:min(100%,380px);">
           <button class="btn-primary" id="linkDevice">Link this device</button>
           <p id="deviceLinkStatus" role="status"></p>
           <p>Keep the code private: anyone with it can view and add scores in this history.</p>
@@ -382,7 +382,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
 </div>
 
 <script src="score-config.js"></script>
-<script src="score-sync.js?v=20261001-device-link"></script>
+<script src="score-sync.js?v=20261001-local-merge"></script>
 <script>
 const DATA = {};
 
@@ -1593,7 +1593,7 @@ let scoreViewRequest = 0;
 function escapeScoreText(value) {
   return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-async function renderHighscores(event){
+async function renderHighscores(event, alreadySynced=false){
   if (event && ['highscoreBtnStart','highscoreBtnResults','highscoreBtn'].includes(event.currentTarget?.id)) {
     $("scoreDivision").value = state.division || 'primary';
   }
@@ -1604,20 +1604,16 @@ async function renderHighscores(event){
   $("highscores").hidden = false;
   const request = ++scoreViewRequest;
   const division = $("scoreDivision").value;
-  $("syncStatus").textContent = 'Syncing saved rounds and loading scores…';
-  for (const id of ['overallStats','allRoundsTable','notRealSection','roundList','problemPassages']) $(id).innerHTML = '';
-  let data;
-  try {
-    let importFailed=false;
-    try { await ScoreSync.importLocal(); } catch { importFailed=true; }
-    const result = await ScoreSync.list(division);
-    if (request !== scoreViewRequest) return;
-    data = result.rounds;
-    $("syncStatus").textContent = result.shared ? (importFailed ? 'Shared scores loaded, but some browser rounds could not sync. Click Refresh scores to retry.' : `Saved rounds import automatically. ${data.length} shared rounds in this division. History ${result.historyId || ''}${result.linked ? ' (linked devices)' : ' (current network)'}.`) : 'This browser’s scores. Network sharing is not configured yet.';
-  } catch {
-    if (request !== scoreViewRequest) return;
-    data = ScoreSync.local().filter(r=>r.division===division);
-    $("syncStatus").textContent = 'Network scores unavailable. Showing only this browser’s saved rounds.';
+  const data = ScoreSync.local().filter(r=>r.division===division);
+  $("syncStatus").textContent = alreadySynced ? 'Scores saved in this browser. Sync complete.' : 'Showing this browser’s saved scores. Syncing linked history…';
+  if (!alreadySynced) {
+    ScoreSync.sync().then(()=>{
+      if (request===scoreViewRequest) renderHighscores(null,true);
+    }).catch(()=>{
+      if (request!==scoreViewRequest) return;
+      renderHighscores(null,true);
+      $("syncStatus").textContent='Showing locally saved scores. Sync could not finish; click Sync scores to retry. No local rounds were removed.';
+    });
   }
   const overall = $("overallStats");
   const allRounds = $("allRoundsTable");
@@ -1741,7 +1737,7 @@ async function handleDeviceLink(create) {
   try {
     if (create) {
       const code=await ScoreSync.createDeviceCode();
-      $("deviceCodeResult").textContent=code.match(/.{4}/g).join('-');
+      $("deviceCodeResult").textContent=code;
       $("deviceCodeResult").hidden=false;
     } else {
       await ScoreSync.linkDevice($("deviceCodeInput").value);
@@ -1755,6 +1751,9 @@ async function handleDeviceLink(create) {
 }
 $("createDeviceCode").addEventListener('click',()=>handleDeviceLink(true));
 $("linkDevice").addEventListener('click',()=>handleDeviceLink(false));
+window.addEventListener('scores-synced',()=>{
+  if (!$("highscores").hidden) renderHighscores(null,true);
+});
 $("scoreDivision").addEventListener('change', renderHighscores);
 $("refreshScores").addEventListener('click', renderHighscores);
 $("highscoreBtnStart").addEventListener('click', renderHighscores);

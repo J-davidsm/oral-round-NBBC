@@ -6,7 +6,7 @@ function environment() {
   const rows=[];const links=new Map();
   return {rows, NETWORK_SECRET:'test-secret-not-for-deployment',ALLOWED_ORIGIN:'https://j-davidsm.github.io', DB:{prepare(sql){ return {bind(...args){ return {
     async first(){return links.has(args[0])?{network:links.get(args[0])}:null;},
-    async run(){if(sql.includes('INSERT INTO device_links')) {links.set(args[0],args[1]);return;} const [network,id,division,record]=args; if(!rows.some(r=>r.network===network&&r.id===id)) rows.push({network,id,division,record});},
+    async run(){if(sql.includes('INSERT INTO device_links')) {if(links.has(args[0]))return {meta:{changes:0}};links.set(args[0],args[1]);return {meta:{changes:1}};} const [network,id,division,record]=args; if(!rows.some(r=>r.network===network&&r.id===id)) rows.push({network,id,division,record});},
     async all(){const [network,division,after]=args;return {results:rows.filter(r=>r.network===network&&r.division===division&&r.id>after).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,201)};}
   };}};}}};
 }
@@ -54,7 +54,7 @@ test('a private device code shares history across different public IPs',async()=
   const env=environment();
   await worker.fetch(request('192.0.2.1','POST',record),env);
   const create=new Request('https://scores.example/device-link',{method:'POST',headers:{'CF-Connecting-IP':'192.0.2.1'}});
-  const {code}=await (await worker.fetch(create,env)).json();assert.match(code,/^[a-f0-9]{32}$/);
+  const {code}=await (await worker.fetch(create,env)).json();assert.match(code,/^[0-9]{8}$/);
   const linked=request('198.51.100.2');linked.headers.set('X-Score-Link',code);
   const result=await (await worker.fetch(linked,env)).json();assert.equal(result.rounds.length,1);
   const junior=request('198.51.100.2','GET',null,'division=junior');junior.headers.set('X-Score-Link',code);
@@ -64,4 +64,9 @@ test('a private device code shares history across different public IPs',async()=
   assert.equal((await (await worker.fetch(request('192.0.2.1'),env)).json()).rounds.length,2);
   linked.headers.set('X-Score-Link','0'.repeat(32));assert.equal((await worker.fetch(linked,env)).status,403);
   assert.equal((await (await worker.fetch(request('198.51.100.2'),env)).json()).rounds.length,0);
+});
+
+test('passage detail survives validation for local-storage merging',()=>{
+ const r=validateRecord({...record,details:[{ref:'John 1:1',errors:1,points:20,wrongIndices:[2],insertIndices:[],autoZero:false,refErrorTop:true}]});
+ assert.deepEqual(r.details[0].wrongIndices,[2]);assert.equal(r.details[0].refErrorTop,true);
 });
