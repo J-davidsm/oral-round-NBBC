@@ -304,7 +304,7 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
       <div class="results-hero">
         <span class="eyebrow">Round complete</span>
         <div class="score-big" id="scoreBig">0<span>/300</span></div>
-        <div class="score-tag" id="scoreTag"></div>
+        <div class="score-tag" id="scoreTag"></div><p id="roundSyncStatus" role="status"></p>
         <div class="score-meter"><div class="score-meter-fill" id="scoreMeterFill" style="width:0%"></div></div>
       </div>
       <div class="scorecard" id="scorecard"></div>
@@ -317,6 +317,11 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
       <!-- Highscores view (hidden by default) -->
       <section id="highscores" hidden>
         <h2 class="eyebrow" style="color:var(--gold);">Highscores</h2>
+        <label for="scoreDivision">Division</label>
+        <select id="scoreDivision"><option value="primary">Primary</option><option value="junior">Junior</option><option value="senior">Senior</option></select>
+        <button class="btn-primary" id="refreshScores">Refresh scores</button>
+        <button class="btn-primary" id="importScores" hidden>Import this browser’s past rounds</button>
+        <p id="syncStatus" role="status"></p>
         <div id="overallStats"></div>
         <h3 class="eyebrow" style="margin-top:16px;">All Rounds</h3>
         <div id="allRoundsTable"></div>
@@ -366,6 +371,8 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
   </div>
 </div>
 
+<script src="score-config.js"></script>
+<script src="score-sync.js"></script>
 <script>
 const DATA = {};
 
@@ -1364,6 +1371,7 @@ function finishRound(){
   // The stored array contains objects: {date, score, possible, timeLeftSec}.
   try {
     const record = {
+      id: crypto.randomUUID(),
       date: new Date().toISOString(),
       score: total,
       possible: 300,
@@ -1373,9 +1381,20 @@ function finishRound(){
       // Capture per‑passage error details for later analytics
       details: state.records.map(r => r ? { ref: r.ref, errors: r.errors, points: r.points, wrongIndices: r.wrongIndices, insertIndices: r.insertIndices, refErrorTop: !!r.refErrorTop, refErrorBottom: !!r.refErrorBottom, refError: !!(r.refErrorTop || r.refErrorBottom), passed: !!r.passed, autoZero: !!r.autoZero } : null)
     };
-    const existing = JSON.parse(localStorage.getItem('oralRounds') || '[]');
-    existing.push(record);
-    localStorage.setItem('oralRounds', JSON.stringify(existing));
+    let savedLocally = false;
+    try {
+      const existing = ScoreSync.local();
+      existing.push(record);
+      localStorage.setItem('oralRounds', JSON.stringify(existing));
+      savedLocally = true;
+    } catch (error) { console.warn('Local score storage unavailable:', error); }
+    const notice = document.getElementById('roundSyncStatus');
+    notice.textContent = ScoreSync.enabled() ? 'Sharing score with this network…' : (savedLocally ? 'Saved in this browser. Network sharing is not configured yet.' : 'This score could not be saved. Browser storage is unavailable.');
+    ScoreSync.save(record).then(shared => {
+      if (shared) notice.textContent = 'Score saved for this network and division.';
+    }).catch(() => {
+      notice.textContent = savedLocally ? 'Saved in this browser only. Use Import this browser’s past rounds in Highscores to retry on your intended network.' : 'This score could not be saved locally or to the network. Keep this result open.';
+    });
 
     // Send a copy to your Formspree endpoint so the data is emailed to you.
     const formspreeUrl = 'https://formspree.io/f/xzebngqn';
@@ -1560,13 +1579,35 @@ $("voiceModeBtn").addEventListener("click", toggleListening);
 if(SpeechRecognitionCtor){ $("micBtn").hidden = false; }
 
 // ---------- Highscore view handling ----------
-function renderHighscores(){
+let scoreViewRequest = 0;
+function escapeScoreText(value) {
+  return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function renderHighscores(event){
+  if (event && ['highscoreBtnStart','highscoreBtnResults','highscoreBtn'].includes(event.currentTarget?.id)) {
+    $("scoreDivision").value = state.division || 'primary';
+  }
   // Hide other sections
   $("setup").hidden = true;
   $("round").hidden = true;
   $("results").hidden = true;
   $("highscores").hidden = false;
-  const data = JSON.parse(localStorage.getItem('oralRounds') || '[]');
+  const request = ++scoreViewRequest;
+  const division = $("scoreDivision").value;
+  $("importScores").hidden = !ScoreSync.enabled();
+  $("syncStatus").textContent = 'Loading scores…';
+  for (const id of ['overallStats','allRoundsTable','notRealSection','roundList','problemPassages']) $(id).innerHTML = '';
+  let data;
+  try {
+    const result = await ScoreSync.list(division);
+    if (request !== scoreViewRequest) return;
+    data = result.rounds;
+    $("syncStatus").textContent = result.shared ? 'Shared scores for this network. Everyone using the same public IP and division shares this history.' : 'This browser’s scores. Network sharing is not configured yet.';
+  } catch {
+    if (request !== scoreViewRequest) return;
+    data = ScoreSync.local().filter(r=>r.division===division);
+    $("syncStatus").textContent = 'Network scores unavailable. Showing only this browser’s saved rounds.';
+  }
   const overall = $("overallStats");
   const allRounds = $("allRoundsTable");
   const notReal = $("notRealSection");
@@ -1588,41 +1629,7 @@ function renderHighscores(){
     <p>Total points across all rounds: <span style="color:var(--gold)">${totalPoints}</span> / ${totalPossible}</p>
     <p>Overall percentage: <span style="color:var(--gold)">${overallPct}%</span></p>`;
 
-  // ---- Division breakdown (overall, not filtered) ----
-  const divisions = ['primary','junior','senior'];
-  const divRows = divisions.map(div => {
-    const divData = data.filter(r => r.division === div);
-    const points = divData.reduce((s,r) => s + r.score, 0);
-    const possible = divData.length * 300;
-    const pct = possible ? ((points / possible) * 100).toFixed(1) : '0.0';
-    return `<tr><td>${div.charAt(0).toUpperCase()+div.slice(1)}</td><td>${points}</td><td>${possible}</td><td>${pct}%</td></tr>`;
-  }).join('');
-  if(divRows){
-    const table = `<table class="table"><thead><tr><th>Division</th><th>Points</th><th>Possible</th><th>%</th></tr></thead><tbody>${divRows}</tbody></table>`;
-    overall.insertAdjacentHTML('beforeend', `<h3 class="eyebrow" style="margin-top:12px;">Division Breakdown</h3>${table}`);
-  }
-
-
-  // ------------------------------------------------------------
-  // Division filter UI – add simple navigation links for each division
-  // ------------------------------------------------------------
-  const divisionNav = document.createElement('div');
-  divisionNav.style.marginBottom = '12px';
-  ['primary','junior','senior'].forEach(div => {
-    const link = document.createElement('a');
-    link.href = `${window.location.pathname}?division=${div}`;
-    link.textContent = div.charAt(0).toUpperCase() + div.slice(1);
-    link.style.marginRight = '8px';
-    link.style.color = 'var(--accent)';
-    link.style.textDecoration = 'underline';
-    divisionNav.appendChild(link);
-  });
-  overall.prepend(divisionNav);
-
-  // Apply division filter if present in URL query string
-  const urlParams = new URLSearchParams(window.location.search);
-  const filterDiv = urlParams.get('division');
-  const filteredData = filterDiv ? data.filter(r => r.division === filterDiv) : data;
+  const filteredData = data;
 
   // All rounds table
   const rows = filteredData.map(r=>{
@@ -1710,15 +1717,26 @@ function renderHighscores(){
   } else {
     const topList = sortedPassages.slice(0, 10);
     const listHtml = topList.map(([ref, stats]) =>
-      `<li>${ref} – ${stats.roundsWithErrors} round${stats.roundsWithErrors !== 1 ? 's' : ''}, ${stats.totalErrors} error${stats.totalErrors !== 1 ? 's' : ''}</li>`
+      `<li>${escapeScoreText(ref)} – ${stats.roundsWithErrors} round${stats.roundsWithErrors !== 1 ? 's' : ''}, ${stats.totalErrors} error${stats.totalErrors !== 1 ? 's' : ''}</li>`
     ).join('');
     problemDiv.innerHTML = `<ul>${listHtml}</ul>`;
   }
 }
 
+$("scoreDivision").addEventListener('change', renderHighscores);
+$("refreshScores").addEventListener('click', renderHighscores);
+$("importScores").addEventListener('click', async () => {
+  if (!confirm('Share this browser’s saved rounds with everyone on your CURRENT network? Divisions will remain separate.')) return;
+  const button = $("importScores"); button.disabled = true;
+  ++scoreViewRequest;
+  $("syncStatus").textContent = 'Importing saved rounds…';
+  try { await ScoreSync.importLocal(); await renderHighscores(); }
+  catch { $("syncStatus").textContent = 'Import did not finish. Your local scores are safe; retrying will not duplicate imported rounds.'; }
+  finally { button.disabled = false; }
+});
 $("highscoreBtnStart").addEventListener('click', renderHighscores);
 $("highscoreBtnResults").addEventListener('click', renderHighscores);
-$("backFromHighscores").addEventListener('click', () => { $("highscores").hidden = true; $("setup").hidden = false; });
+$("backFromHighscores").addEventListener('click', () => { ++scoreViewRequest; $("highscores").hidden = true; $("setup").hidden = false; });
 
 // Add navigation to the in‑page highscore view (no external file needed)
 const highscoreBtn = document.createElement('button');

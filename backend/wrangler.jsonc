@@ -1,0 +1,15 @@
+{
+  "name": "oral-round-scores",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-01",
+  "vars": {
+    "ALLOWED_ORIGIN": "https://j-davidsm.github.io"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "oral-round-scores",
+      "database_id": "af637df6-0b39-467c-a73d-4e73cb9d929b"
+    }
+  ]
+}

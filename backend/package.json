@@ -1,0 +1,13 @@
+{
+  "name": "oral-round-scores",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "node deploy.mjs",
+    "dev": "wrangler dev",
+    "test": "node --test *.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
