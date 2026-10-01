@@ -4,9 +4,9 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../score-sync.js',import.meta.url),'utf8');
 function client(records=[],url='',fetch=()=>{throw new Error('unexpected network request');}) {
-  let stored=JSON.stringify(records);
+  const storage=new Map([['oralRounds',JSON.stringify(records)]]);
   const window={SCORE_API_URL:url,addEventListener:()=>{}};
-  vm.runInNewContext(source.split('// Opening the site')[0],{window,fetch,AbortSignal,crypto,localStorage:{getItem:()=>stored,setItem:(key,value)=>{stored=value;}}});
+  vm.runInNewContext(source.split('// Opening the site')[0],{window,fetch,AbortSignal,crypto,localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)}});
   return window.ScoreSync;
 }
 test('unconfigured frontend filters local history by division',async()=>{
@@ -50,11 +50,29 @@ test('concurrent imports share one upload and failed uploads can retry',async()=
 test('opening the page automatically imports existing rounds',async()=>{
   let stored=JSON.stringify([{division:'primary',score:100}]);let requests=0;
   const context={SCORE_API_URL:'https://scores.example',addEventListener:()=>{},AbortSignal,crypto,
-    localStorage:{getItem:()=>stored,setItem:(key,value)=>{stored=value;}},
+    localStorage:{getItem:key=>key==='oralRounds'?stored:null,setItem:(key,value)=>{if(key==='oralRounds') stored=value;}},
     fetch:async()=>{requests++;return {ok:true,json:async()=>({saved:true})};}};
   context.window=context;
   vm.runInNewContext(source,context);
   await context.ScoreSync.importLocal();
   assert.equal(requests,1);
   assert.equal(JSON.parse(stored)[0].sharedScoreApi,'https://scores.example');
+});
+
+test('linking another device selects its history and imports to that history once',async()=>{
+  const code='a'.repeat(32);const requests=[];
+  const api=client([{id:'r'.repeat(32),division:'primary',sharedScoreApi:'https://scores.example'}],'https://scores.example',async(url,options)=>{
+    requests.push({url,options});return {ok:true,json:async()=>({rounds:[],next:null,historyId:'example'})};
+  });
+  assert.equal(await api.importLocal(),0);
+  await api.linkDevice(code);
+  assert.equal(await api.importLocal(),1);
+  assert.equal(await api.importLocal(),0);
+  assert.equal(requests[1].options.headers['X-Score-Link'],code);
+  const result=await api.list('primary');assert.equal(result.linked,true);
+});
+test('failed linking preserves the existing selected history',async()=>{
+  const api=client([],'https://scores.example',async()=>({ok:false,status:403}));
+  await assert.rejects(api.linkDevice('a'.repeat(32)));
+  assert.equal(await api.importLocal(),0);
 });

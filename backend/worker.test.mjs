@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import worker, {networkKey, validateRecord} from './worker.js';
 const record={id:'a'.repeat(32),date:'2026-10-01T12:00:00Z',division:'primary',score:250,possible:300,timeLeftSec:60,details:[{ref:'John 1:1',errors:1,points:20}]};
 function environment() {
-  const rows=[];
+  const rows=[];const links=new Map();
   return {rows, NETWORK_SECRET:'test-secret-not-for-deployment',ALLOWED_ORIGIN:'https://j-davidsm.github.io', DB:{prepare(sql){ return {bind(...args){ return {
-    async run(){const [network,id,division,record]=args; if(!rows.some(r=>r.network===network&&r.id===id)) rows.push({network,id,division,record});},
+    async first(){return links.has(args[0])?{network:links.get(args[0])}:null;},
+    async run(){if(sql.includes('INSERT INTO device_links')) {links.set(args[0],args[1]);return;} const [network,id,division,record]=args; if(!rows.some(r=>r.network===network&&r.id===id)) rows.push({network,id,division,record});},
     async all(){const [network,division,after]=args;return {results:rows.filter(r=>r.network===network&&r.division===division&&r.id>after).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,201)};}
   };}};}}};
 }
@@ -47,4 +48,20 @@ test('missing server identity/config and disallowed origins are rejected',async(
   assert.equal((await worker.fetch(bad,env)).status,403);
   delete env.NETWORK_SECRET;
   assert.equal((await worker.fetch(request('192.0.2.1'),env)).status,503);
+});
+
+test('a private device code shares history across different public IPs',async()=>{
+  const env=environment();
+  await worker.fetch(request('192.0.2.1','POST',record),env);
+  const create=new Request('https://scores.example/device-link',{method:'POST',headers:{'CF-Connecting-IP':'192.0.2.1'}});
+  const {code}=await (await worker.fetch(create,env)).json();assert.match(code,/^[a-f0-9]{32}$/);
+  const linked=request('198.51.100.2');linked.headers.set('X-Score-Link',code);
+  const result=await (await worker.fetch(linked,env)).json();assert.equal(result.rounds.length,1);
+  const junior=request('198.51.100.2','GET',null,'division=junior');junior.headers.set('X-Score-Link',code);
+  assert.equal((await (await worker.fetch(junior,env)).json()).rounds.length,0);
+  const write=request('198.51.100.2','POST',{...record,id:'b'.repeat(32)});write.headers.set('X-Score-Link',code);
+  assert.equal((await worker.fetch(write,env)).status,200);
+  assert.equal((await (await worker.fetch(request('192.0.2.1'),env)).json()).rounds.length,2);
+  linked.headers.set('X-Score-Link','0'.repeat(32));assert.equal((await worker.fetch(linked,env)).status,403);
+  assert.equal((await (await worker.fetch(request('198.51.100.2'),env)).json()).rounds.length,0);
 });

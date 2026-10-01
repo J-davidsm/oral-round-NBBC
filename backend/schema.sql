@@ -6,3 +6,8 @@ CREATE TABLE IF NOT EXISTS rounds (
   PRIMARY KEY (network, id)
 );
 CREATE INDEX IF NOT EXISTS rounds_network_division ON rounds(network, division, id);
+
+CREATE TABLE IF NOT EXISTS device_links (
+  code_hash TEXT PRIMARY KEY,
+  network TEXT NOT NULL
+);

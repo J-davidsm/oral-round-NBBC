@@ -44,14 +44,22 @@ The website continues using browser history until a Worker URL is configured.
 
 The API derives an HMAC identifier from Cloudflare's trusted `CF-Connecting-IP`
 header. Raw IP addresses and location text are not stored in the score database.
-The browser cannot choose a network identifier. The database indexes by network
+The browser cannot choose a network identifier directly. An optional private device
+code grants access to the history that created it; only a keyed hash of the code
+is stored in the device_links table. The database indexes by network
 and division; duplicate round IDs on the same network are ignored.
 
 This is a shared network history, not an individual account. Anyone on the same
 public IP can read and add scores. IP changes, carrier NAT, VPNs, and per-device
 IPv6 addresses can cause histories to split or unrelated users to share one.
-City geolocation is deliberately not used to identify households. A household
-code or sign-in would be needed for reliable identity across IP changes.
+City geolocation is deliberately not used to identify households. Use **Missing scores on another device?** in Highscores to link devices when their
+public addresses differ. On the device showing the full history, create a device
+code, then enter it on the other device. Both devices remember the shared history
+across IP changes; divisions remain separate. Linking imports local rounds into
+that history without deleting the original copies. Codes grant read/write access
+and should be kept private. Clearing browser storage removes the remembered link.
+
+Device codes use 128 random bits and are sent in a request header, never a URL.
 
 Keep database credentials and NETWORK_SECRET on the server. CORS restricts browser
 origins but is not user authentication. Submitted practice scores are self-reported.

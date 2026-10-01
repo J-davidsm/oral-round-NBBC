@@ -321,6 +321,17 @@ button:focus-visible,.word:focus-visible,.gap:focus-visible,input:focus-visible,
         <select id="scoreDivision"><option value="primary">Primary</option><option value="junior">Junior</option><option value="senior">Senior</option></select>
         <button class="btn-primary" id="refreshScores">Refresh scores</button>
         <p id="syncStatus" role="status"></p>
+        <details style="margin:16px 0;">
+          <summary>Missing scores on another device?</summary>
+          <p>On the device showing your full history, create a code. Enter that code on the other device to share the same history, even if your internet addresses differ. Linked devices keep this history on other networks too.</p>
+          <button class="btn-primary" id="createDeviceCode">Create device code</button>
+          <p id="deviceCodeResult" hidden></p>
+          <label for="deviceCodeInput">Code from the other device</label>
+          <input id="deviceCodeInput" type="text" autocomplete="off" spellcheck="false" style="width:min(100%,380px);">
+          <button class="btn-primary" id="linkDevice">Link this device</button>
+          <p id="deviceLinkStatus" role="status"></p>
+          <p>Keep the code private: anyone with it can view and add scores in this history.</p>
+        </details>
         <div id="overallStats"></div>
         <h3 class="eyebrow" style="margin-top:16px;">All Rounds</h3>
         <div id="allRoundsTable"></div>
@@ -1602,7 +1613,7 @@ async function renderHighscores(event){
     const result = await ScoreSync.list(division);
     if (request !== scoreViewRequest) return;
     data = result.rounds;
-    $("syncStatus").textContent = result.shared ? (importFailed ? 'Shared scores loaded, but some browser rounds could not sync. Click Refresh scores to retry.' : 'Saved rounds import automatically. Shared scores for this network and division.') : 'This browser’s scores. Network sharing is not configured yet.';
+    $("syncStatus").textContent = result.shared ? (importFailed ? 'Shared scores loaded, but some browser rounds could not sync. Click Refresh scores to retry.' : `Saved rounds import automatically. ${data.length} shared rounds in this division. History ${result.historyId || ''}${result.linked ? ' (linked devices)' : ' (current network)'}.`) : 'This browser’s scores. Network sharing is not configured yet.';
   } catch {
     if (request !== scoreViewRequest) return;
     data = ScoreSync.local().filter(r=>r.division===division);
@@ -1723,6 +1734,27 @@ async function renderHighscores(event){
   }
 }
 
+async function handleDeviceLink(create) {
+  const status=$("deviceLinkStatus");
+  $("createDeviceCode").disabled=true; $("linkDevice").disabled=true;
+  status.textContent=create ? 'Creating your device code…' : 'Connecting to the shared history…';
+  try {
+    if (create) {
+      const code=await ScoreSync.createDeviceCode();
+      $("deviceCodeResult").textContent=code.match(/.{4}/g).join('-');
+      $("deviceCodeResult").hidden=false;
+    } else {
+      await ScoreSync.linkDevice($("deviceCodeInput").value);
+      $("deviceCodeInput").value='';
+    }
+    status.textContent=create ? 'Enter this code on the other device. This device is now linked too.' : 'Device linked. Loading and syncing scores…';
+    await renderHighscores();
+  } catch (error) {
+    status.textContent='Could not link devices. Check the code and connection, then try again. Your saved rounds are safe.';
+  } finally { $("createDeviceCode").disabled=false; $("linkDevice").disabled=false; }
+}
+$("createDeviceCode").addEventListener('click',()=>handleDeviceLink(true));
+$("linkDevice").addEventListener('click',()=>handleDeviceLink(false));
 $("scoreDivision").addEventListener('change', renderHighscores);
 $("refreshScores").addEventListener('click', renderHighscores);
 $("highscoreBtnStart").addEventListener('click', renderHighscores);

@@ -29,26 +29,41 @@ export default {
     if (origin === env.ALLOWED_ORIGIN) Object.assign(headers, {
       'Access-Control-Allow-Origin':origin,
       'Access-Control-Allow-Methods':'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers':'Content-Type'
+      'Access-Control-Allow-Headers':'Content-Type, X-Score-Link'
     });
     const reply = (body, status=200) => new Response(JSON.stringify(body), {status, headers});
     if (origin && origin !== env.ALLOWED_ORIGIN) return reply({error:'Origin not allowed'},403);
     if (request.method === 'OPTIONS') return new Response(null, {status:204,headers});
     const url = new URL(request.url);
-    if (url.pathname !== '/rounds') return reply({error:'Not found'},404);
+    if (!['/rounds','/device-link'].includes(url.pathname)) return reply({error:'Not found'},404);
     if (!['GET','POST'].includes(request.method)) return reply({error:'Method not allowed'},405);
     // Trust only the IP supplied by Cloudflare, never a browser-supplied identifier.
     const ip = request.headers.get('CF-Connecting-IP');
     if (!ip || !env.NETWORK_SECRET || !env.DB) return reply({error:'Score service is not configured'},503);
     try {
-      const network = await networkKey(ip, env.NETWORK_SECRET);
+      let network = await networkKey(ip, env.NETWORK_SECRET);
+      const link = request.headers.get('X-Score-Link');
+      if (link) {
+        if (!/^[a-f0-9]{32}$/.test(link)) return reply({error:'Invalid device code'},400);
+        const codeHash = await networkKey('device-link:'+link, env.NETWORK_SECRET);
+        const row = await env.DB.prepare('SELECT network FROM device_links WHERE code_hash = ?').bind(codeHash).first();
+        if (!row) return reply({error:'Device code not found'},403);
+        network = row.network;
+      }
+      if (url.pathname === '/device-link') {
+        if (request.method !== 'POST') return reply({error:'Method not allowed'},405);
+        const code = Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+        const codeHash = await networkKey('device-link:'+code, env.NETWORK_SECRET);
+        await env.DB.prepare('INSERT INTO device_links (code_hash, network) VALUES (?, ?)').bind(codeHash,network).run();
+        return reply({code,historyId:network.slice(0,12)});
+      }
       if (request.method === 'GET') {
         const division = url.searchParams.get('division');
         const after = url.searchParams.get('after') || '';
         if (!divisions.includes(division) || (after && !idPattern.test(after))) return reply({error:'Invalid query'},400);
         const {results} = await env.DB.prepare('SELECT id, record FROM rounds WHERE network = ? AND division = ? AND id > ? ORDER BY id LIMIT 201').bind(network, division, after).all();
         const page = results.slice(0,200);
-        return reply({rounds:page.map(row=>JSON.parse(row.record)), next:results.length>200?page[199].id:null});
+        return reply({rounds:page.map(row=>JSON.parse(row.record)), next:results.length>200?page[199].id:null,historyId:network.slice(0,12)});
       }
       if (!request.headers.get('Content-Type')?.startsWith('application/json')) return reply({error:'JSON required'},415);
       // Read a bounded stream so a client cannot submit an unbounded request body.
